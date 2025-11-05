@@ -25,7 +25,7 @@ export default function Home() {
         // setActiveRooms(userRooms);
         setActiveRooms([]); // Empty until you implement Firebase query
       } catch (error) {
-        console.error('Error fetching user rooms:', error);
+        console.error('Failed to load your rooms. Please try again later.', error);
         setActiveRooms([]);
       }
     };
@@ -84,7 +84,7 @@ const handleActiveRooms = () => {
       >
         <View style={styles.header}>
           <Text style={styles.title}>birabuddy</Text>
-          <Text style={styles.subtitle}>hello</Text>
+          <Text style={styles.subtitle}>hello! have fun, be casual</Text>
         </View>
 
         {/* Active Rooms Section */}

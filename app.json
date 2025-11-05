@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "BiraBuddy",
-    "slug": "birabuddy",
-    "version": "1.0.0",
+    "name": "BeerBuddy",
+    "slug": "beerbuddy",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "birabuddy",
+    "scheme": "beerbuddy",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "description": "üni öğrencileri için birabuddy bulma uygulaması-şimdilik sadece boğaziçi öğrencileri",
-    "primaryColor": "#86945fff",
+    "primaryColor": "##1E1E1E",
     "platforms": [
       "ios",
       "android"
@@ -22,8 +22,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.caglaryildirim.birabuddy",
-      "buildNumber": "1",
+      "bundleIdentifier": "com.caglaryildirim.beerbuddy",
+      "buildNumber": "7",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses camera to scan beer labels and take photos",
         "NSLocationWhenInUseUsageDescription": "This app uses location to find nearby breweries and bars",
@@ -31,11 +31,11 @@
       }
     },
     "android": {
-      "package": "com.caglaryildirim.birabuddy",
+      "package": "com.caglaryildirim.beerbuddy",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#D2691E"
+        "backgroundColor": "##1E1E1E"
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
@@ -57,7 +57,7 @@
           "image": "./assets/images/icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#D2691E"
+          "backgroundColor": "##1E1E1E"
         }
       ]
     ],

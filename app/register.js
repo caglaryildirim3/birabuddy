@@ -31,7 +31,7 @@ export default function Register() {
 
 Bu Kişisel Verilerin Korunması Politikası, BiraBuddy mobil uygulaması tarafından toplanan, işlenen ve saklanan kişisel verilerinizin korunması amacıyla, 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") uyarınca hazırlanmıştır.
 
-**Veri Sorumlusu:** Çağlar Yıldırım  
+**Veri Sorumlusu:** birabuddy  
 **İletişim:** birabuddy@gmail.com
 
 ## 2. Önemli Uyarılar ve Sorumluluk Reddi
