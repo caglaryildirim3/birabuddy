@@ -1,41 +1,37 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import moment from 'moment';
-import {
-  SafeAreaView,
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-  Alert,
-  Modal,
-  ScrollView,
-  Platform,
-  TextInput,
-  FlatList,
-  KeyboardAvoidingView,
-  TouchableWithoutFeedback,
-  Keyboard,
-} from 'react-native';
-import { onAuthStateChanged } from 'firebase/auth';
-import { useButtonDelay } from '../../hooks/useButtonDelay';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  addDoc,
+  arrayRemove,
+  arrayUnion,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
-  updateDoc,
-  arrayUnion,
-  arrayRemove,
-  serverTimestamp,
-  deleteDoc,
-  setDoc,
-  addDoc,
-  query,
   orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
 } from 'firebase/firestore';
-import { auth, db } from '../../firebase/firebaseConfig';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from 'react-native';
 import UserProfile from '../../components/UserProfile';
+import { auth, db } from '../../firebase/firebaseConfig';
+import { useButtonDelay } from '../../hooks/useButtonDelay';
 
 export default function RoomDetails() {
   const { id } = useLocalSearchParams();
@@ -89,8 +85,8 @@ const [reportReason, setReportReason] = useState('');
   const getDisplayLocation = () => {
     if (!room) return 'Not specified';
     
-    if (isParticipant) {
-      // Show full location for participants
+    // Show full location for participants AND creator
+      if (isParticipant || isCreator) {
       if (room.barName && room.neighborhood) {
         return `${room.barName}, ${room.neighborhood}`;
       } else if (room.fullLocation) {
@@ -200,10 +196,10 @@ const handleSendPress = () => {
   };
 
   // Memoize expensive calculations
-  const isCreator = useMemo(() => 
-    auth.currentUser?.uid === room?.createdBy, 
-    [auth.currentUser?.uid, room?.createdBy]
-  );
+ const isCreator = useMemo(() => {
+  if (!auth.currentUser?.uid || !room?.createdBy) return false;
+  return auth.currentUser.uid === room.createdBy;
+}, [auth.currentUser?.uid, room?.createdBy]);
 
   const formattedDate = useMemo(() => 
     formatDateString(room?.date), 
@@ -227,77 +223,151 @@ const handleSendPress = () => {
     setSelectedUserProfile(null);
   }, []);
 
-// Optimized useEffect for room data with debouncing
+// Replace the entire useEffect starting at line ~175 with this FIXED version:
+
 useEffect(() => {
   if (!id) return;
+  console.log('🚀 === ROOM DATA LOADER STARTED ===');
+  console.log('📍 Room ID:', id);
+  console.log('👤 Current User:', auth.currentUser?.uid);
+  
   setIsLoading(true);
 
   const roomRef = doc(db, 'rooms', id);
-  let debounceTimer;
 
-  const unsubscribeRoom = onSnapshot(roomRef, async (docSnap) => {
-    if (docSnap.exists()) {
+  const unsubscribeRoom = onSnapshot(
+    roomRef, 
+    async (docSnap) => {
+      console.log('📥 Room snapshot received');
+      
+      if (!docSnap.exists()) {
+        console.log('❌ Room does not exist!');
+        Alert.alert('Room Not Found', 'This room no longer exists.', [
+          { text: 'OK', onPress: () => router.replace('/my-rooms') }
+        ]);
+        return;
+      }
+
       const roomData = docSnap.data();
+      console.log('✅ Room exists!');
+      console.log('📊 Room Data:', {
+        name: roomData.name,
+        createdBy: roomData.createdBy,
+        hasRequests: !!roomData.requests,
+        requestsArray: roomData.requests,
+        requestsLength: roomData.requests?.length || 0,
+      });
+      
       setRoom(roomData);
       setIsLoading(false);
       
-      // Process requests immediately without debouncing
-    const uids = roomData?.requests || [];
-    const timestamps = roomData?.requestTimestamps || {};
+      // Check if current user is creator
+      const isUserCreator = auth.currentUser?.uid === roomData.createdBy;
+      console.log('👑 Creator Check:', {
+        currentUserUID: auth.currentUser?.uid,
+        roomCreatedBy: roomData.createdBy,
+        isCreator: isUserCreator,
+      });
+      
+      // Process requests
+      const uids = roomData?.requests || [];
+      const timestamps = roomData?.requestTimestamps || {};
 
-    console.log('🔍 Requests found:', uids); // DEBUG
-    console.log('🔍 Timestamps:', timestamps); // DEBUG
+      console.log('📋 Processing Requests:');
+      console.log('  - UIDs array:', uids);
+      console.log('  - Number of requests:', uids.length);
 
+      if (uids.length > 0) {
+        console.log('🔄 Fetching user data for', uids.length, 'requests...');
+        
+        try {
+          const requests = [];
+          
+          for (let i = 0; i < uids.length; i++) {
+            const uid = uids[i];
+            console.log(`  - [${i + 1}/${uids.length}] Fetching user: ${uid.substring(0, 8)}...`);
+            
+            try {
+              const userSnap = await getDoc(doc(db, 'users', uid));
+              const userData = userSnap.exists() ? userSnap.data() : {};
+              const nickname = userData.nickname || `User-${uid.substring(0, 6)}`;
+              const major = userData.major || '';
 
-if (uids.length > 0) {
-  const requests = await Promise.all(
-    uids.map(async (uid) => {
-      const userSnap = await getDoc(doc(db, 'users', uid));
-      const userData = userSnap.exists() ? userSnap.data() : {};
-      const nickname = userData.nickname || `User-${uid.substring(0, 6)}`;
-      const major = userData.major || '';
+              // Handle timestamp - might be Firestore Timestamp or already a Date
+              let requestedAt = new Date();
+              if (timestamps[uid]) {
+                if (timestamps[uid].toDate && typeof timestamps[uid].toDate === 'function') {
+                  requestedAt = timestamps[uid].toDate();
+                } else if (timestamps[uid].seconds) {
+                  requestedAt = new Date(timestamps[uid].seconds * 1000);
+                }
+              }
 
-      const requestedAt = timestamps[uid]?.toDate() || new Date();
+              console.log(`    ✓ Got: ${nickname} (${major || 'no major'})`);
 
-      return {
-        uid,
-        nickname,
-        major,
-        requestedAt,  // Use the adjusted local time here
-      };
-    })
+              requests.push({
+                uid,
+                nickname,
+                major,
+                requestedAt,
+              });
+            } catch (userError) {
+              console.error(`    ❌ Error fetching user ${uid}:`, userError);
+              // Add with default values anyway
+              requests.push({
+                uid,
+                nickname: `User-${uid.substring(0, 6)}`,
+                major: '',
+                requestedAt: new Date(),
+              });
+            }
+          }
+
+          // Sort by request time
+          requests.sort((a, b) => {
+            const timeA = a.requestedAt instanceof Date ? a.requestedAt.getTime() : 0;
+            const timeB = b.requestedAt instanceof Date ? b.requestedAt.getTime() : 0;
+            return timeA - timeB;
+          });
+
+          console.log('✅ Successfully processed', requests.length, 'requests');
+          console.log('📝 Request nicknames:', requests.map(r => r.nickname));
+          
+          setJoinRequests(requests);
+          console.log('💾 setJoinRequests() called successfully');
+          
+        } catch (error) {
+          console.error('❌ Error processing requests:', error);
+          setJoinRequests([]);
+        }
+      } else {
+        console.log('ℹ️ No requests to process (uids.length = 0)');
+        setJoinRequests([]);
+      }
+    }, 
+    (error) => {
+      console.error('❌ Room snapshot error:', error);
+      setIsLoading(false);
+    }
   );
 
- requests.sort((a, b) => {
-  const timeA = a.requestedAt instanceof Date ? a.requestedAt.getTime() : 0;
-  const timeB = b.requestedAt instanceof Date ? b.requestedAt.getTime() : 0;
-  return timeA - timeB;
-});
-
-  console.log('✅ Setting join requests:', requests); // DEBUG
-  setJoinRequests(requests);
-} else {
-  console.log('ℹ️ No requests found'); // DEBUG
-  setJoinRequests([]);
-}
-
-    } else {
-      Alert.alert('Room Not Found', 'This room no longer exists.', [
-        { text: 'OK', onPress: () => router.replace('/my-rooms') }
-      ]);
-    }
-  });
-
+  // Participants listener
   let unsubscribeParticipants;
   if (auth.currentUser?.uid) {
+    console.log('👥 Setting up participants listener...');
+    
     const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
     unsubscribeParticipants = onSnapshot(
       participantsCollectionRef,
       async (snapshot) => {
+        console.log('👥 Participants snapshot received:', snapshot.docs.length, 'participants');
+        
         const currentParticipantUids = participants.map(p => p.uid).sort().join(',');
         const newParticipantUids = snapshot.docs.map(doc => doc.data().uid).sort().join(',');
         
         if (currentParticipantUids !== newParticipantUids) {
+          console.log('🔄 Participants changed, reloading...');
+          
           const list = await Promise.all(
             snapshot.docs.map(async (docSnap) => {
               const data = docSnap.data();
@@ -310,20 +380,41 @@ if (uids.length > 0) {
               return { uid: data.uid, nickname, major };
             })
           );
+          
+          console.log('👥 Participants loaded:', list.map(p => p.nickname));
           setParticipants(list);
+        } else {
+          console.log('👥 Participants unchanged, skipping update');
         }
+      },
+      (error) => {
+        console.error('❌ Participants snapshot error:', error);
       }
     );
   } else {
+    console.log('⚠️ No current user, skipping participants listener');
     setParticipants([]);
   }
 
   return () => {
-    clearTimeout(debounceTimer);
+    console.log('🧹 Cleaning up listeners');
     unsubscribeRoom();
     if (unsubscribeParticipants) unsubscribeParticipants();
   };
 }, [id]);
+
+// Add this separate useEffect to log state changes
+useEffect(() => {
+  console.log('🔔 STATE UPDATED:');
+  console.log('  - joinRequests:', joinRequests.length, 'items');
+  if (joinRequests.length > 0) {
+    console.log('  - joinRequests names:', joinRequests.map(r => r.nickname));
+  }
+  console.log('  - participants:', participants.length, 'items');
+  console.log('  - isCreator:', isCreator);
+  console.log('  - isParticipant:', isParticipant);
+  console.log('  - hasRequestedJoin:', hasRequestedJoin);
+}, [joinRequests, participants, isCreator, isParticipant, hasRequestedJoin]);
 
   useEffect(() => {
     checkParticipationStatus(participants, joinRequests);
@@ -461,7 +552,13 @@ const submitReport = async () => {
   };
 
   const handleApprove = async (requestUser) => {
-    const roomRef = doc(db, 'rooms', id);
+  // Prevent users from approving their own requests
+  if (requestUser.uid === auth.currentUser?.uid) {
+    Alert.alert('Error', 'You cannot approve your own join request.');
+    return;
+  }
+
+  const roomRef = doc(db, 'rooms', id);
     const participantDocRef = doc(db, 'rooms', id, 'participants', requestUser.uid);
 
     try {
@@ -781,77 +878,123 @@ const submitReport = async () => {
               </View>
             </View>
 
-            {/* Join Requests - Only for creators */}
-            {true && (  // Test için her zaman göster
-                <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>📋 Join Requests</Text>
-                  {joinRequests.length > 0 && (
-                    <View style={styles.requestCount}>
-                      <Text style={styles.requestCountText}>{joinRequests.length}</Text>
-                    </View>
-                  )}
-                </View>
-                
-                {joinRequests.length > 0 && (
-                  <Pressable
-                    style={styles.approveAllButton}
-                    onPress={async () => {
-                      for (const r of joinRequests) {
-                        await handleApprove(r);
-                      }
-                    }}
-                  >
-                    <Text style={styles.approveAllText}>✅ Approve All ({joinRequests.length})</Text>
-                  </Pressable>
-                )}
+            // Replace the Join Requests section (around line 330-390) with this:
 
-                <View style={styles.requestsList}>
-                  {joinRequests.length > 0 ? (
-                    joinRequests.map((r) => (
-                      <View key={r.uid} style={styles.requestCard}>
-                        <View style={styles.requestLeft}>
-                          <View style={styles.requestAvatar}>
-                            <Text style={styles.requestAvatarText}>
-                              {(r.nickname || 'A').charAt(0).toUpperCase()}
-                            </Text>
-                          </View>
-                          <View style={styles.requestInfo}>
-                            <Pressable onPress={() => handleUserProfileClick(r.uid)}>
-                              <Text style={[styles.requestName, styles.clickableUsername]}>
-                                {r.nickname || 'Anonymous'}
-                              </Text>
-                              {r.major && (
-                                <Text style={styles.requestMajor}>🎓 {r.major}</Text>
-                              )}
-                            </Pressable>
-                          </View>
-                        </View>
-                        <View style={styles.requestActions}>
-                          <Pressable
-                            style={styles.approveButton}
-                            onPress={() => handleApprove(r)}
-                          >
-                            <Text style={styles.approveText}>✓</Text>
-                          </Pressable>
-                          <Pressable
-                            style={styles.declineButton}
-                            onPress={() => handleDecline(r)}
-                          >
-                            <Text style={styles.declineText}>✕</Text>
-                          </Pressable>
-                        </View>
-                      </View>
-                    ))
-                  ) : (
-                    <View style={styles.emptyState}>
-                      <Text style={styles.emptyIcon}>📪</Text>
-                      <Text style={styles.emptyText}>No pending requests</Text>
-                    </View>
-                  )}
-                </View>
+{/* DEBUG BOX - Shows what's happening */}
+<View style={[styles.section, { backgroundColor: '#ff6b6b', padding: 16, borderRadius: 12 }]}>
+  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
+    🔍 DEBUG INFO
+  </Text>
+  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
+    isCreator: {String(isCreator)} {isCreator ? '✅' : '❌'}
+  </Text>
+  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
+    Current UID: {auth.currentUser?.uid?.substring(0, 12)}
+  </Text>
+  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
+    Room createdBy: {room?.createdBy?.substring(0, 12)}
+  </Text>
+  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
+    Match: {String(auth.currentUser?.uid === room?.createdBy)} {auth.currentUser?.uid === room?.createdBy ? '✅' : '❌'}
+  </Text>
+  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
+    joinRequests.length: {joinRequests.length}
+  </Text>
+  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
+    room.requests: {JSON.stringify(room?.requests?.map(uid => uid.substring(0, 8)))}
+  </Text>
+  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
+    Section will show: {String(isCreator)}
+  </Text>
+</View>
+
+{/* Join Requests - Only for creators */}
+{isCreator && (
+  <View style={styles.section}>
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>📋 Join Requests</Text>
+      {joinRequests.length > 0 && (
+        <View style={styles.requestCount}>
+          <Text style={styles.requestCountText}>{joinRequests.length}</Text>
+        </View>
+      )}
+    </View>
+    
+    {joinRequests.length > 0 && (
+      <Pressable
+        style={styles.approveAllButton}
+        onPress={async () => {
+          console.log('🚀 Approve all pressed');
+          for (const r of joinRequests) {
+            await handleApprove(r);
+          }
+        }}
+      >
+        <Text style={styles.approveAllText}>✅ Approve All ({joinRequests.length})</Text>
+      </Pressable>
+    )}
+
+    <View style={styles.requestsList}>
+      {joinRequests.length > 0 ? (
+        joinRequests.map((r) => (
+          <View key={r.uid} style={styles.requestCard}>
+            <View style={styles.requestLeft}>
+              <View style={styles.requestAvatar}>
+                <Text style={styles.requestAvatarText}>
+                  {(r.nickname || 'A').charAt(0).toUpperCase()}
+                </Text>
               </View>
-            )}
+              <View style={styles.requestInfo}>
+                <Pressable onPress={() => handleUserProfileClick(r.uid)}>
+                  <Text style={[styles.requestName, styles.clickableUsername]}>
+                    {r.nickname || 'Anonymous'}
+                  </Text>
+                  {r.major && (
+                    <Text style={styles.requestMajor}>🎓 {r.major}</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+            <View style={styles.requestActions}>
+              <Pressable
+                style={styles.approveButton}
+                onPress={() => {
+                  console.log('✅ Approve pressed for:', r.nickname);
+                  handleApprove(r);
+                }}
+              >
+                <Text style={styles.approveText}>✓</Text>
+              </Pressable>
+              <Pressable
+                style={styles.declineButton}
+                onPress={() => {
+                  console.log('❌ Decline pressed for:', r.nickname);
+                  handleDecline(r);
+                }}
+              >
+                <Text style={styles.declineText}>✕</Text>
+              </Pressable>
+            </View>
+          </View>
+        ))
+      ) : (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyIcon}>📪</Text>
+          <Text style={styles.emptyText}>No pending requests</Text>
+        </View>
+      )}
+    </View>
+  </View>
+)}
+
+{/* If not creator, show why */}
+{!isCreator && (
+  <View style={[styles.section, { backgroundColor: '#ffc107', padding: 16, borderRadius: 12 }]}>
+    <Text style={{ color: '#000', fontSize: 14 }}>
+      ⚠️ Join Requests section hidden because isCreator = false
+    </Text>
+  </View>
+)}
 
             {/* Join Room Section - For non-participants */}
             {!isParticipant && !isCreator && (
