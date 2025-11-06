@@ -243,10 +243,11 @@ useEffect(() => {
       
       // Process requests immediately without debouncing
     const uids = roomData?.requests || [];
-const timestamps = roomData?.requestTimestamps || {};
+    const timestamps = roomData?.requestTimestamps || {};
 
-console.log('🔍 Requests found:', uids); // DEBUG
-console.log('🔍 Timestamps:', timestamps); // DEBUG
+    console.log('🔍 Requests found:', uids); // DEBUG
+    console.log('🔍 Timestamps:', timestamps); // DEBUG
+
 
 if (uids.length > 0) {
   const requests = await Promise.all(
@@ -256,8 +257,7 @@ if (uids.length > 0) {
       const nickname = userData.nickname || `User-${uid.substring(0, 6)}`;
       const major = userData.major || '';
 
-      // Convert UTC timestamp to local time using moment.js
-      const requestedAt = moment.utc(timestamps[uid]?.toDate()).local().format('YYYY-MM-DD HH:mm:ss');
+      const requestedAt = timestamps[uid]?.toDate() || new Date();
 
       return {
         uid,
@@ -268,8 +268,11 @@ if (uids.length > 0) {
     })
   );
 
-  // Sort requests by the time they were requested (now in local time)
-  requests.sort((a, b) => a.requestedAt - b.requestedAt);
+ requests.sort((a, b) => {
+  const timeA = a.requestedAt instanceof Date ? a.requestedAt.getTime() : 0;
+  const timeB = b.requestedAt instanceof Date ? b.requestedAt.getTime() : 0;
+  return timeA - timeB;
+});
 
   console.log('✅ Setting join requests:', requests); // DEBUG
   setJoinRequests(requests);
@@ -779,8 +782,8 @@ const submitReport = async () => {
             </View>
 
             {/* Join Requests - Only for creators */}
-            {isCreator && (
-              <View style={styles.section}>
+            {true && (  // Test için her zaman göster
+                <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>📋 Join Requests</Text>
                   {joinRequests.length > 0 && (
