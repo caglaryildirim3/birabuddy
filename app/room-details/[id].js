@@ -226,92 +226,92 @@ const handleSendPress = () => {
     setSelectedUserProfile(null);
   }, []);
 
-  // Optimized useEffect for room data with debouncing
-  useEffect(() => {
-    if (!id) return;
-    setIsLoading(true);
+// Optimized useEffect for room data with debouncing
+useEffect(() => {
+  if (!id) return;
+  setIsLoading(true);
 
-    const roomRef = doc(db, 'rooms', id);
-    setIsLoading(true);
-    let debounceTimer;
+  const roomRef = doc(db, 'rooms', id);
+  let debounceTimer;
 
-    const unsubscribeRoom = onSnapshot(roomRef, async (docSnap) => {
-      if (docSnap.exists()) {
-        const roomData = docSnap.data();
-        setRoom(roomData);
-        setIsLoading(false);
-        
-        // Debounce requests processing to avoid excessive re-renders
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(async () => {
-          const uids = roomData?.requests || [];
-          const timestamps = roomData?.requestTimestamps || {};
+  const unsubscribeRoom = onSnapshot(roomRef, async (docSnap) => {
+    if (docSnap.exists()) {
+      const roomData = docSnap.data();
+      setRoom(roomData);
+      setIsLoading(false);
+      
+      // Process requests immediately without debouncing
+      const uids = roomData?.requests || [];
+      const timestamps = roomData?.requestTimestamps || {};
 
-          if (uids.length > 0) {
-            const requests = await Promise.all(
-              uids.map(async (uid) => {
-                const userSnap = await getDoc(doc(db, 'users', uid));
-                const userData = userSnap.exists() ? userSnap.data() : {};
-                const nickname = userData.nickname || `User-${uid.substring(0, 6)}`;
-                const major = userData.major || '';
-                return {
-                  uid,
-                  nickname,
-                  major,
-                  requestedAt: timestamps[uid]?.toDate?.() || new Date(0),
-                };
-              })
-            );
-            requests.sort((a, b) => a.requestedAt - b.requestedAt);
-            setJoinRequests(requests);
-          } else {
-            setJoinRequests([]);
-          }
-        }, 500);
+      console.log('🔍 Requests found:', uids); // DEBUG
+      console.log('🔍 Timestamps:', timestamps); // DEBUG
+
+      if (uids.length > 0) {
+        const requests = await Promise.all(
+          uids.map(async (uid) => {
+            const userSnap = await getDoc(doc(db, 'users', uid));
+            const userData = userSnap.exists() ? userSnap.data() : {};
+            const nickname = userData.nickname || `User-${uid.substring(0, 6)}`;
+            const major = userData.major || '';
+            return {
+              uid,
+              nickname,
+              major,
+              requestedAt: timestamps[uid]?.toDate?.() || new Date(0),
+            };
+          })
+        );
+        requests.sort((a, b) => a.requestedAt - b.requestedAt);
+        console.log('✅ Setting join requests:', requests); // DEBUG
+        setJoinRequests(requests);
       } else {
-        Alert.alert('Room Not Found', 'This room no longer exists.', [
-          { text: 'OK', onPress: () => router.replace('/my-rooms') }
-        ]);
+        console.log('ℹ️ No requests found'); // DEBUG
+        setJoinRequests([]);
       }
-    });
-
-    let unsubscribeParticipants;
-    if (auth.currentUser?.uid) {
-      const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
-      unsubscribeParticipants = onSnapshot(
-        participantsCollectionRef,
-        async (snapshot) => {
-          // Use useMemo-like caching to avoid unnecessary processing
-          const currentParticipantUids = participants.map(p => p.uid).sort().join(',');
-          const newParticipantUids = snapshot.docs.map(doc => doc.data().uid).sort().join(',');
-          
-          if (currentParticipantUids !== newParticipantUids) {
-            const list = await Promise.all(
-              snapshot.docs.map(async (docSnap) => {
-                const data = docSnap.data();
-                const userDoc = await getDoc(doc(db, 'users', data.uid));
-                const userData = userDoc.exists() ? userDoc.data() : {};
-                
-                const nickname = userData.nickname || `User-${data.uid.substring(0, 6)}`;
-                const major = userData.major || '';
-
-                return { uid: data.uid, nickname, major };
-              })
-            );
-            setParticipants(list);
-          }
-        }
-      );
     } else {
-      setParticipants([]);
+      Alert.alert('Room Not Found', 'This room no longer exists.', [
+        { text: 'OK', onPress: () => router.replace('/my-rooms') }
+      ]);
     }
+  });
 
-    return () => {
-      clearTimeout(debounceTimer);
-      unsubscribeRoom();
-      if (unsubscribeParticipants) unsubscribeParticipants();
-    };
-  }, [id, auth.currentUser?.uid]);
+  let unsubscribeParticipants;
+  if (auth.currentUser?.uid) {
+    const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
+    unsubscribeParticipants = onSnapshot(
+      participantsCollectionRef,
+      async (snapshot) => {
+        const currentParticipantUids = participants.map(p => p.uid).sort().join(',');
+        const newParticipantUids = snapshot.docs.map(doc => doc.data().uid).sort().join(',');
+        
+        if (currentParticipantUids !== newParticipantUids) {
+          const list = await Promise.all(
+            snapshot.docs.map(async (docSnap) => {
+              const data = docSnap.data();
+              const userDoc = await getDoc(doc(db, 'users', data.uid));
+              const userData = userDoc.exists() ? userDoc.data() : {};
+              
+              const nickname = userData.nickname || `User-${data.uid.substring(0, 6)}`;
+              const major = userData.major || '';
+
+              return { uid: data.uid, nickname, major };
+            })
+          );
+          setParticipants(list);
+        }
+      }
+    );
+  } else {
+    setParticipants([]);
+  }
+
+  return () => {
+    clearTimeout(debounceTimer);
+    unsubscribeRoom();
+    if (unsubscribeParticipants) unsubscribeParticipants();
+  };
+}, [id]);
 
   useEffect(() => {
     checkParticipationStatus(participants, joinRequests);
