@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import moment from 'moment';
 import {
   SafeAreaView,
   View,
@@ -241,34 +242,42 @@ useEffect(() => {
       setIsLoading(false);
       
       // Process requests immediately without debouncing
-      const uids = roomData?.requests || [];
-      const timestamps = roomData?.requestTimestamps || {};
+    const uids = roomData?.requests || [];
+const timestamps = roomData?.requestTimestamps || {};
 
-      console.log('🔍 Requests found:', uids); // DEBUG
-      console.log('🔍 Timestamps:', timestamps); // DEBUG
+console.log('🔍 Requests found:', uids); // DEBUG
+console.log('🔍 Timestamps:', timestamps); // DEBUG
 
-      if (uids.length > 0) {
-        const requests = await Promise.all(
-          uids.map(async (uid) => {
-            const userSnap = await getDoc(doc(db, 'users', uid));
-            const userData = userSnap.exists() ? userSnap.data() : {};
-            const nickname = userData.nickname || `User-${uid.substring(0, 6)}`;
-            const major = userData.major || '';
-            return {
-              uid,
-              nickname,
-              major,
-              requestedAt: timestamps[uid]?.toDate?.() || new Date(0),
-            };
-          })
-        );
-        requests.sort((a, b) => a.requestedAt - b.requestedAt);
-        console.log('✅ Setting join requests:', requests); // DEBUG
-        setJoinRequests(requests);
-      } else {
-        console.log('ℹ️ No requests found'); // DEBUG
-        setJoinRequests([]);
-      }
+if (uids.length > 0) {
+  const requests = await Promise.all(
+    uids.map(async (uid) => {
+      const userSnap = await getDoc(doc(db, 'users', uid));
+      const userData = userSnap.exists() ? userSnap.data() : {};
+      const nickname = userData.nickname || `User-${uid.substring(0, 6)}`;
+      const major = userData.major || '';
+
+      // Convert UTC timestamp to local time using moment.js
+      const requestedAt = moment.utc(timestamps[uid]?.toDate()).local().format('YYYY-MM-DD HH:mm:ss');
+
+      return {
+        uid,
+        nickname,
+        major,
+        requestedAt,  // Use the adjusted local time here
+      };
+    })
+  );
+
+  // Sort requests by the time they were requested (now in local time)
+  requests.sort((a, b) => a.requestedAt - b.requestedAt);
+
+  console.log('✅ Setting join requests:', requests); // DEBUG
+  setJoinRequests(requests);
+} else {
+  console.log('ℹ️ No requests found'); // DEBUG
+  setJoinRequests([]);
+}
+
     } else {
       Alert.alert('Room Not Found', 'This room no longer exists.', [
         { text: 'OK', onPress: () => router.replace('/my-rooms') }
