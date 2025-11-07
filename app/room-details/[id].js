@@ -128,7 +128,8 @@ const [reportReason, setReportReason] = useState('');
 
   try {
     const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-    const nickname = userDoc.exists() ? userDoc.data().nickname : 'unknown';
+const userData = userDoc.exists() ? userDoc.data() : {};
+const nickname = userData.instagram || userData.nickname || 'unknown';
 
     const messagesRef = collection(db, 'rooms', id, 'messages');
     await addDoc(messagesRef, {
@@ -289,8 +290,20 @@ useEffect(() => {
             
             try {
               const userSnap = await getDoc(doc(db, 'users', uid));
-              const userData = userSnap.exists() ? userSnap.data() : {};
-              const nickname = userData.nickname || `User-${uid.substring(0, 6)}`;
+              
+              if (!userSnap.exists()) {
+                console.log(`    ⚠️ User document doesn't exist for ${uid}`);
+                requests.push({
+                  uid,
+                  nickname: `User-${uid.substring(0, 6)}`,
+                  major: '',
+                  requestedAt: new Date(),
+                });
+                continue;
+              }
+              
+              const userData = userSnap.data();
+const nickname = userData.instagram || userData.nickname || `User-${uid.substring(0, 6)}`;
               const major = userData.major || '';
 
               // Handle timestamp - might be Firestore Timestamp or already a Date
@@ -312,8 +325,8 @@ useEffect(() => {
                 requestedAt,
               });
             } catch (userError) {
-              console.error(`    ❌ Error fetching user ${uid}:`, userError);
-              // Add with default values anyway
+              console.error(`    ❌ Error fetching user ${uid}:`, userError.code || userError.message);
+              // Add with default values on error
               requests.push({
                 uid,
                 nickname: `User-${uid.substring(0, 6)}`,
@@ -321,8 +334,7 @@ useEffect(() => {
                 requestedAt: new Date(),
               });
             }
-          }
-
+}
           // Sort by request time
           requests.sort((a, b) => {
             const timeA = a.requestedAt instanceof Date ? a.requestedAt.getTime() : 0;
@@ -372,9 +384,18 @@ useEffect(() => {
             snapshot.docs.map(async (docSnap) => {
               const data = docSnap.data();
               const userDoc = await getDoc(doc(db, 'users', data.uid));
-              const userData = userDoc.exists() ? userDoc.data() : {};
               
-              const nickname = userData.nickname || `User-${data.uid.substring(0, 6)}`;
+              if (!userDoc.exists()) {
+                console.log(`⚠️ User document doesn't exist for ${data.uid}`);
+                return { 
+                  uid: data.uid, 
+                  nickname: `User-${data.uid.substring(0, 6)}`, 
+                  major: '' 
+                };
+              }
+              
+              const userData = userDoc.data();
+const nickname = userData.instagram || userData.nickname || `User-${data.uid.substring(0, 6)}`;
               const major = userData.major || '';
 
               return { uid: data.uid, nickname, major };
@@ -878,35 +899,7 @@ const submitReport = async () => {
               </View>
             </View>
 
-            // Replace the Join Requests section (around line 330-390) with this:
 
-{/* DEBUG BOX - Shows what's happening */}
-<View style={[styles.section, { backgroundColor: '#ff6b6b', padding: 16, borderRadius: 12 }]}>
-  <Text style={{ color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
-    🔍 DEBUG INFO
-  </Text>
-  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
-    isCreator: {String(isCreator)} {isCreator ? '✅' : '❌'}
-  </Text>
-  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
-    Current UID: {auth.currentUser?.uid?.substring(0, 12)}
-  </Text>
-  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
-    Room createdBy: {room?.createdBy?.substring(0, 12)}
-  </Text>
-  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
-    Match: {String(auth.currentUser?.uid === room?.createdBy)} {auth.currentUser?.uid === room?.createdBy ? '✅' : '❌'}
-  </Text>
-  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
-    joinRequests.length: {joinRequests.length}
-  </Text>
-  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
-    room.requests: {JSON.stringify(room?.requests?.map(uid => uid.substring(0, 8)))}
-  </Text>
-  <Text style={{ color: '#fff', fontSize: 14, marginBottom: 4 }}>
-    Section will show: {String(isCreator)}
-  </Text>
-</View>
 
 {/* Join Requests - Only for creators */}
 {isCreator && (
@@ -987,14 +980,7 @@ const submitReport = async () => {
   </View>
 )}
 
-{/* If not creator, show why */}
-{!isCreator && (
-  <View style={[styles.section, { backgroundColor: '#ffc107', padding: 16, borderRadius: 12 }]}>
-    <Text style={{ color: '#000', fontSize: 14 }}>
-      ⚠️ Join Requests section hidden because isCreator = false
-    </Text>
-  </View>
-)}
+
 
             {/* Join Room Section - For non-participants */}
             {!isParticipant && !isCreator && (
