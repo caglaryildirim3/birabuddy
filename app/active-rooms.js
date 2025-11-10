@@ -279,7 +279,7 @@ const roomsWithCreatorInfo = await Promise.all(
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#be6044ff',
+    backgroundColor: '#4A3B47',
   },
   header: {
     flexDirection: 'row',
@@ -297,19 +297,19 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   backButtonText: {
-    color: '#f3f1d4ff',
+    color: '#E8D5DA',
     fontSize: 16,
     fontWeight: '500',
   },
   title: {
     fontSize: 24,
     fontWeight: '600',
-    color: '#f3f1d4ff',
+    color: '#E8A4C7',
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
-    color: '#DCD8A7',
+    color: '#E8D5DA',
     textAlign: 'center',
     marginBottom: 20,
     fontStyle: 'italic',
@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   roomCard: {
-    backgroundColor: 'rgba(247, 255, 232, 0.95)',
+    backgroundColor: '#E8D5DA',
     borderRadius: 16,
     padding: 18,
     marginBottom: 16,
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   roomName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     flex: 1,
     marginRight: 10,
   },
@@ -402,13 +402,13 @@ const styles = StyleSheet.create({
   },
   roomLocation: {
     fontSize: 14,
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     marginBottom: 6,
     opacity: 0.8,
   },
   roomDateTime: {
     fontSize: 14,
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     marginBottom: 12,
     opacity: 0.8,
   },
@@ -420,18 +420,18 @@ const styles = StyleSheet.create({
   },
   participantCount: {
     fontSize: 14,
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     fontWeight: '500',
   },
   createdBy: {
     fontSize: 12,
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     opacity: 0.7,
     fontStyle: 'italic',
   },
   roomDescription: {
     fontSize: 14,
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     fontStyle: 'italic',
     marginBottom: 15,
     opacity: 0.8,

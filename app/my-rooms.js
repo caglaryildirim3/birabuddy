@@ -400,7 +400,7 @@ export default function MyRooms() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#86945fff',
+    backgroundColor: '#4A3B47',
   },
   scrollContent: {
     padding: 20,
@@ -447,7 +447,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   roomCard: {
-    backgroundColor: 'rgba(247, 255, 232, 0.95)',
+    backgroundColor: '#E8D5DA',
     borderRadius: 16,
     padding: 18,
     marginBottom: 16,
@@ -464,23 +464,23 @@ const styles = StyleSheet.create({
   roomName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1C6F75',
+    color: '#4d4c41ff',
   },
   roomLocation: {
     fontSize: 14,
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     marginBottom: 4,
     opacity: 0.8,
   },
   roomDateTime: {
     fontSize: 14,
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     marginBottom: 4,
     opacity: 0.8,
   },
   participantCount: {
     fontSize: 14,
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     fontWeight: '500',
     marginBottom: 12,
   },
@@ -500,13 +500,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   joinButton: {
-    backgroundColor: '#E1B604',
+    backgroundColor: '#dfc0c9ff',
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
   },
   joinButtonText: {
-    color: '#1C6F75',
+    color: '#4d4c41ff',
     fontSize: 14,
     fontWeight: 'bold',
   },

@@ -84,7 +84,7 @@ const handleActiveRooms = () => {
       >
         <View style={styles.header}>
           <Text style={styles.title}>birabuddy</Text>
-          <Text style={styles.subtitle}>hello! have fun, be casual</Text>
+          <Text style={styles.subtitle}>have fun, be casual</Text>
         </View>
 
         {/* Active Rooms Section */}
@@ -150,7 +150,7 @@ const handleActiveRooms = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#775871ff',
+    backgroundColor: '#4A3B47',
   },
   scrollView: {
     flex: 1,
@@ -165,12 +165,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 16,
     right: 0,
-    backgroundColor: '#775871ff',
+    backgroundColor: '#4A3B47',
     padding: 10,
     borderRadius: 20,
     zIndex: 10,
     elevation: 3,
-    shadowColor: '#1d58c6ff',
+    shadowColor: '#4A3B47',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
@@ -200,9 +200,9 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   title: {
-    fontSize: 36,
+    fontSize: 45,
     fontWeight: '600',
-    color: '#e2c8e9ff',
+    color: '#E8A4C7',
     fontFamily: 'Courier New', // Simple, clean system font
     textAlign: 'center',
     letterSpacing: 1,
@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     fontWeight: '300',
-    color: '#d7d7baff',
+    color: '#E8D5DA',
     marginTop: 20,
     fontStyle: 'italic',
   },
@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   button: {
-    backgroundColor: '#f7ffe8ff',
+    backgroundColor: '#E8D5DA',
     paddingVertical: 22,
     paddingHorizontal: 32,
     borderRadius: 16,
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   buttonText: {
-    color: '#1C6F75',
+    color: '#104245ff',
     fontSize: 18,
     fontWeight: 'bold',
   },
