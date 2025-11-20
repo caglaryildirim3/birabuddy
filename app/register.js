@@ -20,9 +20,6 @@ export default function Register() {
   
   const router = useRouter();
 
-  // Updated allowed domains array
-  const allowedDomains = ["@std.bogazici.edu.tr", "@std.yildiz.edu.tr", "@itu.edu.tr"];
-
   // KVKK Tam Metni
   const kvkkFullText = `
 # BiraBuddy Kişisel Verilerin Korunması Politikası
@@ -403,23 +400,16 @@ Sorularınız, şikayetleriniz veya veri talepleriniz için:
 Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
   `;
 
-  // Updated validation function for multiple domains
-const validateEmail = (email) => {
+  // Updated validation function to accept ANY .edu.tr domain
+  const validateEmail = (email) => {
     const emailLower = email.toLowerCase();
-    const isValidDomain = allowedDomains.some(domain => emailLower.endsWith(domain.toLowerCase()));
     
-    if (!isValidDomain) {
+    // Basic check: Must end with .edu.tr
+    if (!emailLower.endsWith('.edu.tr')) {
       return false;
     }
     
-    // Find which domain it matches and get the username part
-    const matchedDomain = allowedDomains.find(domain => emailLower.endsWith(domain.toLowerCase()));
-    const username = emailLower.replace(matchedDomain.toLowerCase(), '');
-    
-    if (username.length < 1) {
-      return false;
-    }
-    
+    // Standard regex for email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   };
@@ -427,7 +417,6 @@ const validateEmail = (email) => {
   const validateInstagramUsername = (username) => {
     if (username.length < 2) return false;
     if (username.length > 30) return false;
-    // Instagram username validation: letters, numbers, underscores, periods
     const instagramRegex = /^[a-zA-Z0-9._]+$/;
     return instagramRegex.test(username);
   };
@@ -441,25 +430,21 @@ const validateEmail = (email) => {
     const trimmedEmail = email.trim();
     const trimmedInstagramUsername = instagramUsername.trim();
 
-    // Field validation
     if (!trimmedEmail || !password || !trimmedInstagramUsername) {
       Alert.alert('Missing Fields', 'Please fill in all fields.');
       return;
     }
 
-    // KVKK onay kontrolü
     if (!kvkkAccepted) {
       Alert.alert('KVKK Onayı Gerekli', 'Devam etmek için KVKK aydınlatma metnini kabul etmeniz gerekmektedir.');
       return;
     }
 
-    // Yaş onay kontrolü
     if (!ageConfirmed) {
       Alert.alert('Yaş Onayı Gerekli', 'Bu uygulama sadece 18 yaş ve üzeri kişiler içindir. Yaş onayını vermeniz gerekmektedir.');
       return;
     }
 
-    // Kullanım koşulları kontrolü
     if (!termsAccepted) {
       Alert.alert('Kullanım Koşulları', 'Devam etmek için Kullanım Koşulları ve Gizlilik Politikasını kabul etmeniz gerekmektedir.');
       return;
@@ -476,7 +461,7 @@ const validateEmail = (email) => {
     if (!validateEmail(trimmedEmail)) {
       Alert.alert(
         'Invalid Email',
-        'Please enter a valid university student email from: Boğaziçi University, Yıldız Technical University, or Istanbul Technical University'
+        'Please enter a valid university student email ending in .edu.tr'
       );
       return;
     }
@@ -493,76 +478,69 @@ const validateEmail = (email) => {
     let userCredential = null;
 
     try {
-      // Step 1: Create user account
       console.log('Creating user account...');
       userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
       console.log('User account created successfully');
 
-      // Step 2: Send email verification immediately after account creation
       console.log('Sending verification email...');
       try {
         await sendEmailVerification(userCredential.user);
         console.log('Verification email sent');
       } catch (emailError) {
         console.log('Email verification error:', emailError);
-        // If verification email fails, clean up and inform user
         try {
           await deleteUser(userCredential.user);
-        } catch (cleanupError) {
-          console.log('Could not clean up user after email failure:', cleanupError);
-        }
+        } catch (cleanupError) {}
         
         Alert.alert(
           'Registration Failed',
-          'We couldn\'t send the verification email. Please try registering again or check your internet connection.'
+          'We couldn\'t send the verification email. Please try again.'
         );
         return;
       }
 
-      // Determine university based on email domain
-      let university = 'University';
-      const emailLower = trimmedEmail.toLowerCase();
-      if (emailLower.includes('@std.bogazici.edu.tr')) {
-        university = 'Boğaziçi University';
-      } else if (emailLower.includes('@std.yildiz.edu.tr')) {
-        university = 'Yıldız Technical University';
-      } else if (emailLower.includes('@itu.edu.tr')) {
-        university = 'Istanbul Technical University';
+      // AUTOMATICALLY DETECT UNIVERSITY FROM DOMAIN
+      // Example: ali@metu.edu.tr -> splits to 'metu.edu.tr' -> removes .edu.tr -> 'metu'
+      let university = 'University Student';
+      try {
+        const domainPart = trimmedEmail.split('@')[1]; // gets 'metu.edu.tr'
+        if (domainPart) {
+            // Remove common prefixes like 'std', 'mail', 'ogrenci' if they exist
+            let cleanDomain = domainPart.replace('std.', '').replace('mail.', '').replace('ogrenci.', '');
+            // Remove .edu.tr
+            let uniName = cleanDomain.replace('.edu.tr', '');
+            // Capitalize
+            university = uniName.toUpperCase() + ' UNIV.';
+        }
+      } catch (e) {
+        console.log("Could not parse university name, using default.");
       }
 
-      // Step 3: Save user data to Firestore - KVKK bilgileri ile birlikte
       console.log('Saving user data to Firestore...');
-      console.log('Instagram username being saved:', trimmedInstagramUsername);
       try {
         await setDoc(doc(db, 'users', userCredential.user.uid), {
-          instagram: trimmedInstagramUsername,  // Use 'instagram' field to match existing data structure
+          instagram: trimmedInstagramUsername,
           email: trimmedEmail,
-          university: university,
+          university: university, // Automatically detected university name
           emailVerified: false,
           createdAt: new Date(),
           lastLogin: null,
-          // KVKK ve yasal onay bilgileri
           kvkkConsent: true,
           kvkkConsentDate: new Date(),
-          kvkkConsentVersion: '1.0', // Metin versiyonu takibi için
+          kvkkConsentVersion: '1.0',
           ageConfirmed: true,
           ageConfirmationDate: new Date(),
           termsAccepted: true,
           termsAcceptanceDate: new Date(),
           termsVersion: '1.0'
         });
-        console.log('User data saved to Firestore successfully');
-        console.log('User data saved to Firestore');
       } catch (firestoreError) {
         console.log('Firestore error (non-critical):', firestoreError);
       }
 
-      // Step 4: Sign out user immediately
       console.log('Signing out user...');
       await signOut(auth);
-      console.log('User signed out successfully');
 
-      // Success message
       Alert.alert(
         '✅ Account Created Successfully!',
         `Verification email sent to ${trimmedEmail}.\n\nPlease check your inbox (including spam folder) and click the verification link before logging in.`,
@@ -577,29 +555,20 @@ const validateEmail = (email) => {
     } catch (error) {
       console.log('Registration error:', error);
       
-      // If user was created but something else failed, clean up
       if (userCredential?.user) {
         try {
           await deleteUser(userCredential.user);
-          console.log('Cleaned up partially created user');
-        } catch (cleanupError) {
-          console.log('Could not clean up user:', cleanupError);
-        }
+        } catch (cleanupError) {}
       }
 
-      // Handle specific Firebase errors
       let errorMessage = 'Registration failed. Please try again.';
       
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'This email is already registered. Try logging in instead.';
       } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'Password is too weak. Please choose a stronger password.';
+        errorMessage = 'Password is too weak.';
       } else if (error.code === 'auth/invalid-email') {
         errorMessage = 'Please enter a valid email address.';
-      } else if (error.code === 'auth/network-request-failed') {
-        errorMessage = 'Network error. Please check your internet connection and try again.';
-      } else if (error.code === 'auth/too-many-requests') {
-        errorMessage = 'Too many registration attempts. Please wait a moment and try again.';
       }
       
       Alert.alert('Registration Failed', errorMessage);
@@ -625,7 +594,7 @@ const validateEmail = (email) => {
       
       <TextInput
         style={styles.input}
-        placeholder="student email (bogazici/yildiz/itu)"
+        placeholder="student email (ending with .edu.tr)"
         placeholderTextColor="#aaa"
         value={email}
         onChangeText={setEmail}
@@ -636,7 +605,7 @@ const validateEmail = (email) => {
       
       <TextInput
         style={styles.input}
-        placeholder="password (pls choose it different than uni email password)"
+        placeholder="password"
         placeholderTextColor="#aaa"
         value={password}
         onChangeText={setPassword}
@@ -644,10 +613,8 @@ const validateEmail = (email) => {
         autoComplete="password"
       />
 
-      {/* Tüm Onay Kutuları */}
       <View style={styles.agreementsContainer}>
         
-        {/* Yaş Onayı */}
         <View style={styles.agreementItem}>
           <Pressable 
             style={styles.checkboxContainer}
@@ -662,7 +629,6 @@ const validateEmail = (email) => {
           </Pressable>
         </View>
 
-        {/* KVKK Onayı */}
         <View style={styles.agreementItem}>
           <Pressable 
             style={styles.checkboxContainer}
@@ -683,7 +649,6 @@ const validateEmail = (email) => {
           </Pressable>
         </View>
 
-        {/* Kullanım Koşulları */}
         <View style={styles.agreementItem}>
           <Pressable 
             style={styles.checkboxContainer}
@@ -830,7 +795,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     fontSize: 12,
   },
-  // Yeni Stil Tanımları
   agreementsContainer: {
     marginBottom: 16,
     backgroundColor: 'rgba(78, 4, 225, 0.2)',
@@ -879,14 +843,6 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 18,
   },
-  kvkkDetailButton: {
-    alignSelf: 'flex-start',
-  },
-  kvkkDetailText: {
-    color: '#e5f253ff',
-    fontSize: 12,
-    textDecorationLine: 'underline',
-  },
   button: {
     backgroundColor: '#4e04e1ff',
     padding: 14,
@@ -921,7 +877,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
     textDecorationLine: 'underline',
   },
-  // Modal Stilleri
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
