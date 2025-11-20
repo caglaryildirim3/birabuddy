@@ -1,29 +1,29 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useRouter } from 'expo-router';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
-  View,
-  Text,
+  addDoc,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  updateDoc,
+} from 'firebase/firestore';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Dimensions,
   FlatList,
   Pressable,
-  StyleSheet,
-  Alert,
-  SafeAreaView,
   RefreshControl,
-  Dimensions
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View
 } from 'react-native';
-import { onAuthStateChanged } from 'firebase/auth';
-import { useRouter } from 'expo-router';
-import {
-  collection,
-  onSnapshot,
-  updateDoc,
-  doc,
-  addDoc,
-  getDoc,
-  serverTimestamp,
-  arrayUnion,
-  deleteDoc,
-} from 'firebase/firestore';
-import { db, auth } from '../firebase/firebaseConfig';
+import { auth, db } from '../firebase/firebaseConfig';
 
 // Get screen dimensions for consistent card sizing
 const { width: screenWidth } = Dimensions.get('window');
@@ -355,6 +355,7 @@ const styles = StyleSheet.create({
     color: '#4d4c41ff',
     textAlign: 'center',
     marginBottom: 6,
+    
   },
   location: {
     color: '#4d4c41ff',

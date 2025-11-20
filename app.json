@@ -21,9 +21,9 @@
       "policy": "sdkVersion"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
+      "deploymentTarget": "13.4",
       "bundleIdentifier": "com.caglaryildirim.birabuddy2",
-      "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses camera to scan beer labels and take photos",
         "NSLocationWhenInUseUsageDescription": "This app uses location to find nearby breweries and bars",

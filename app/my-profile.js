@@ -10,7 +10,8 @@ import {
   ScrollView,
   ActivityIndicator,
   Linking,
-  Platform
+  Platform,
+  Modal
 } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
 import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
@@ -31,6 +32,11 @@ export default function MyProfile() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [userStats, setUserStats] = useState({ roomsCreated: 0, roomsJoined: 0 });
+  
+  // Instagram edit modal state
+  const [showInstagramModal, setShowInstagramModal] = useState(false);
+  const [tempInstagram, setTempInstagram] = useState('');
+  const [updatingInstagram, setUpdatingInstagram] = useState(false);
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -102,6 +108,49 @@ export default function MyProfile() {
   // Clean Instagram username
   const cleanInstagramHandle = (handle) => {
     return handle.replace(/[@\s]/g, '').toLowerCase();
+  };
+
+  // Open Instagram edit modal
+  const openInstagramEdit = () => {
+    setTempInstagram(instagram);
+    setShowInstagramModal(true);
+  };
+
+  // Save Instagram username
+  const saveInstagram = async () => {
+    const cleanedHandle = cleanInstagramHandle(tempInstagram);
+    
+    if (!cleanedHandle.trim()) {
+      Alert.alert('Invalid Username', 'Please enter a valid Instagram username');
+      return;
+    }
+
+    if (cleanedHandle === instagram) {
+      setShowInstagramModal(false);
+      return;
+    }
+
+    try {
+      setUpdatingInstagram(true);
+      
+      await setDoc(
+        doc(db, 'users', user.uid),
+        { 
+          instagram: cleanedHandle,
+          updatedAt: new Date()
+        },
+        { merge: true }
+      );
+
+      setInstagram(cleanedHandle);
+      setOriginalInstagram(cleanedHandle);
+      setShowInstagramModal(false);
+      Alert.alert('Success! 📸', 'Instagram username updated successfully');
+    } catch (error) {
+      Alert.alert('Error', `Failed to update Instagram: ${error.message}`);
+    } finally {
+      setUpdatingInstagram(false);
+    }
   };
 
   const handleUpdateProfile = async () => {
@@ -279,9 +328,17 @@ export default function MyProfile() {
               <Text style={styles.favDrink}>🍻 {favDrink}</Text>
             )}
             {instagram && (
-              <Pressable onPress={openInstagram}>
-                <Text style={styles.instagram}>📸 @{instagram}</Text>
-              </Pressable>
+              <View style={styles.instagramContainer}>
+                <Pressable onPress={openInstagram}>
+                  <Text style={styles.instagram}>📸 @{instagram}</Text>
+                </Pressable>
+                <Pressable 
+                  style={styles.editInstagramButton}
+                  onPress={openInstagramEdit}
+                >
+                  <Text style={styles.editInstagramButtonText}>✏️</Text>
+                </Pressable>
+              </View>
             )}
             <Text style={styles.joinDate}>
               joined {user.metadata.creationTime ? 
@@ -363,6 +420,67 @@ export default function MyProfile() {
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* Instagram Edit Modal */}
+      <Modal
+        visible={showInstagramModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        transparent={true}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📸 Edit Instagram</Text>
+              <Pressable 
+                style={styles.modalCloseButton}
+                onPress={() => setShowInstagramModal(false)}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.modalLabel}>Instagram Username</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={tempInstagram}
+              onChangeText={setTempInstagram}
+              placeholder="enter username (without @)"
+              placeholderTextColor="#999"
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={30}
+            />
+            <Text style={styles.modalHelpText}>
+              Don't include @ symbol. Just your username.
+            </Text>
+
+            <View style={styles.modalButtons}>
+              <Pressable 
+                style={styles.modalCancelButton}
+                onPress={() => setShowInstagramModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable 
+                style={[
+                  styles.modalSaveButton,
+                  updatingInstagram && styles.buttonDisabled
+                ]}
+                onPress={saveInstagram}
+                disabled={updatingInstagram}
+              >
+                {updatingInstagram ? (
+                  <ActivityIndicator size="small" color="#4A3B47" />
+                ) : (
+                  <Text style={styles.modalSaveText}>Save</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -370,7 +488,7 @@ export default function MyProfile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4A3B47', // Muted dark pink/mauve
+    backgroundColor: '#4A3B47',
   },
   scrollContent: {
     padding: 20,
@@ -390,7 +508,7 @@ const styles = StyleSheet.create({
   header: {
     fontSize: 34,
     fontWeight: 'bold',
-    color: '#E8A4C7', // Soft pink
+    color: '#E8A4C7',
     textAlign: 'center',
     marginBottom: 30,
     letterSpacing: 1,
@@ -398,7 +516,7 @@ const styles = StyleSheet.create({
   profileSection: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#5A4B5C', // Slightly lighter muted pink
+    backgroundColor: '#5A4B5C',
     padding: 24,
     borderRadius: 20,
     marginBottom: 20,
@@ -408,7 +526,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
     borderWidth: 2,
-    borderColor: '#7A6B7D', // Muted purple-pink border
+    borderColor: '#7A6B7D',
   },
   avatarContainer: {
     alignItems: 'center',
@@ -418,7 +536,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#E8A4C7', // Soft pink
+    backgroundColor: '#E8A4C7',
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -427,15 +545,15 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
     borderWidth: 3,
-    borderColor: '#E8D5DA', // Light pink border
+    borderColor: '#E8D5DA',
   },
   avatarText: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#4A3B47', // Dark pink text
+    color: '#4A3B47',
   },
   ageTag: {
-    backgroundColor: '#C97BA3', // Medium pink
+    backgroundColor: '#C97BA3',
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
@@ -455,7 +573,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    color: '#E8D5DA', // Light pink text
+    color: '#E8D5DA',
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 8,
@@ -467,23 +585,45 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   major: {
-    color: '#E8A4C7', // Soft pink accent
+    color: '#E8A4C7',
     fontSize: 16,
     marginBottom: 6,
     fontWeight: '600',
   },
   favDrink: {
-    color: '#C97BA3', // Medium pink accent
+    color: '#C97BA3',
     fontSize: 16,
     marginBottom: 6,
     fontWeight: '600',
   },
-  instagram: {
-    color: '#A3C7E8', // Soft blue
-    fontSize: 15,
+  instagramContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 8,
+  },
+  instagram: {
+    color: '#A3C7E8',
+    fontSize: 15,
     textDecorationLine: 'underline',
   },
+  editInstagramButton: {
+    marginLeft: 8,
+    backgroundColor: '#7A6B7D',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  editInstagramButtonText: {
+    fontSize: 14,
+  },
+
   joinDate: {
     color: '#E8D5DA',
     fontSize: 12,
@@ -496,7 +636,7 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
-    backgroundColor: '#5A4B5C', // Slightly lighter muted pink
+    backgroundColor: '#5A4B5C',
     padding: 24,
     borderRadius: 16,
     alignItems: 'center',
@@ -506,17 +646,17 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
     borderWidth: 1,
-    borderColor: '#7A6B7D', // Muted purple-pink border
+    borderColor: '#7A6B7D',
   },
   statNumber: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#E8A4C7', // Soft pink
+    color: '#E8A4C7',
     marginBottom: 8,
   },
   statLabel: {
     fontSize: 14,
-    color: '#E8D5DA', // Light pink
+    color: '#E8D5DA',
     opacity: 0.8,
     textAlign: 'center',
   },
@@ -525,24 +665,24 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 24,
-    color: '#E8A4C7', // Soft pink
+    color: '#E8A4C7',
     fontWeight: 'bold',
     marginBottom: 20,
     letterSpacing: 0.5,
   },
   label: {
     fontSize: 16,
-    color: '#E8D5DA', // Light pink
+    color: '#E8D5DA',
     marginBottom: 10,
     fontWeight: '600',
   },
   input: {
-    backgroundColor: '#5A4B5C', // Slightly lighter muted pink
-    color: '#E8D5DA', // Light pink text
+    backgroundColor: '#5A4B5C',
+    color: '#E8D5DA',
     padding: 18,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#7A6B7D', // Muted purple-pink border
+    borderColor: '#7A6B7D',
     fontSize: 16,
     marginBottom: 6,
     shadowColor: '#000',
@@ -558,15 +698,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     marginBottom: 6,
   },
-  helpText: {
-    color: '#E8D5DA',
-    fontSize: 12,
-    opacity: 0.7,
-    fontStyle: 'italic',
-    marginBottom: 16,
-  },
   updateButton: {
-    backgroundColor: '#E8A4C7', // Soft pink
+    backgroundColor: '#E8A4C7',
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
@@ -581,7 +714,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   updateButtonText: {
-    color: '#4A3B47', // Dark pink text
+    color: '#4A3B47',
     fontWeight: 'bold',
     fontSize: 18,
     letterSpacing: 0.5,
@@ -594,12 +727,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   signOutButton: {
-    backgroundColor: '#5A4B5C', // Slightly lighter muted pink
+    backgroundColor: '#5A4B5C',
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#7A6B7D', // Muted purple-pink border
+    borderColor: '#7A6B7D',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
@@ -607,12 +740,12 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   signOutButtonText: {
-    color: '#E8D5DA', // Light pink
+    color: '#E8D5DA',
     fontWeight: 'bold',
     fontSize: 14,
   },
   deleteButton: {
-    backgroundColor: '#B85A6E', // Muted red-pink
+    backgroundColor: '#B85A6E',
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderRadius: 10,
@@ -633,5 +766,103 @@ const styles = StyleSheet.create({
     color: '#d7d7baff',
     bottom: 5,
     fontStyle: 'italic',
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    backgroundColor: '#5A4B5C',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 2,
+    borderColor: '#7A6B7D',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    color: '#E8A4C7',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#7A6B7D',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    color: '#E8D5DA',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalLabel: {
+    color: '#E8D5DA',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  modalInput: {
+    backgroundColor: '#4A3B47',
+    color: '#E8D5DA',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#7A6B7D',
+    fontSize: 16,
+    marginBottom: 8,
+  },
+  modalHelpText: {
+    color: '#E8D5DA',
+    fontSize: 12,
+    opacity: 0.7,
+    fontStyle: 'italic',
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: '#7A6B7D',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    color: '#E8D5DA',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalSaveButton: {
+    flex: 1,
+    backgroundColor: '#E8A4C7',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalSaveText: {
+    color: '#4A3B47',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

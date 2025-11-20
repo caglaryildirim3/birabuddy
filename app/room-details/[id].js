@@ -224,7 +224,7 @@ const handleSendPress = () => {
     setSelectedUserProfile(null);
   }, []);
 
-// Replace the entire useEffect starting at line ~175 with this FIXED version:
+// FIXED VERSION - Replace lines 215-280 in your [id] (6).js file
 
 useEffect(() => {
   if (!id) return;
@@ -239,7 +239,7 @@ useEffect(() => {
   const unsubscribeRoom = onSnapshot(
     roomRef, 
     async (docSnap) => {
-      console.log('📥 Room snapshot received');
+      console.log('🔥 Room snapshot received');
       
       if (!docSnap.exists()) {
         console.log('❌ Room does not exist!');
@@ -251,32 +251,15 @@ useEffect(() => {
 
       const roomData = docSnap.data();
       console.log('✅ Room exists!');
-      console.log('📊 Room Data:', {
-        name: roomData.name,
-        createdBy: roomData.createdBy,
-        hasRequests: !!roomData.requests,
-        requestsArray: roomData.requests,
-        requestsLength: roomData.requests?.length || 0,
-      });
       
       setRoom(roomData);
       setIsLoading(false);
       
-      // Check if current user is creator
-      const isUserCreator = auth.currentUser?.uid === roomData.createdBy;
-      console.log('👑 Creator Check:', {
-        currentUserUID: auth.currentUser?.uid,
-        roomCreatedBy: roomData.createdBy,
-        isCreator: isUserCreator,
-      });
-      
-      // Process requests
+      // Process requests with better error handling
       const uids = roomData?.requests || [];
       const timestamps = roomData?.requestTimestamps || {};
 
-      console.log('📋 Processing Requests:');
-      console.log('  - UIDs array:', uids);
-      console.log('  - Number of requests:', uids.length);
+      console.log('📋 Processing Requests:', uids.length);
 
       if (uids.length > 0) {
         console.log('🔄 Fetching user data for', uids.length, 'requests...');
@@ -291,32 +274,39 @@ useEffect(() => {
             try {
               const userSnap = await getDoc(doc(db, 'users', uid));
               
+              // Check if user document exists
               if (!userSnap.exists()) {
-                console.log(`    ⚠️ User document doesn't exist for ${uid}`);
+                console.log(`    ⚠️ User document doesn't exist for ${uid}, using fallback`);
                 requests.push({
                   uid,
-                  nickname: `User-${uid.substring(0, 6)}`,
-                  major: '',
+                  nickname: `User-${uid.substring(0, 8)}`,
+                  major: 'Unknown',
                   requestedAt: new Date(),
                 });
                 continue;
               }
               
               const userData = userSnap.data();
-const nickname = userData.instagram || userData.nickname || `User-${uid.substring(0, 6)}`;
-              const major = userData.major || '';
+              
+              // Safely extract user data with fallbacks
+              const nickname = userData?.instagram || userData?.nickname || `User-${uid.substring(0, 8)}`;
+              const major = userData?.major || 'Not specified';
 
-              // Handle timestamp - might be Firestore Timestamp or already a Date
+              // Handle timestamp safely
               let requestedAt = new Date();
               if (timestamps[uid]) {
-                if (timestamps[uid].toDate && typeof timestamps[uid].toDate === 'function') {
-                  requestedAt = timestamps[uid].toDate();
-                } else if (timestamps[uid].seconds) {
-                  requestedAt = new Date(timestamps[uid].seconds * 1000);
+                try {
+                  if (timestamps[uid].toDate && typeof timestamps[uid].toDate === 'function') {
+                    requestedAt = timestamps[uid].toDate();
+                  } else if (timestamps[uid].seconds) {
+                    requestedAt = new Date(timestamps[uid].seconds * 1000);
+                  }
+                } catch (timestampError) {
+                  console.log('    ⚠️ Error parsing timestamp, using current time');
                 }
               }
 
-              console.log(`    ✓ Got: ${nickname} (${major || 'no major'})`);
+              console.log(`    ✓ Got: ${nickname} (${major})`);
 
               requests.push({
                 uid,
@@ -325,21 +315,27 @@ const nickname = userData.instagram || userData.nickname || `User-${uid.substrin
                 requestedAt,
               });
             } catch (userError) {
-              console.error(`    ❌ Error fetching user ${uid}:`, userError.code || userError.message);
-              // Add with default values on error
+              console.error(`    ❌ Error fetching user ${uid}:`, userError);
+              // Add user with safe fallback values even on error
               requests.push({
                 uid,
-                nickname: `User-${uid.substring(0, 6)}`,
-                major: '',
+                nickname: `User-${uid.substring(0, 8)}`,
+                major: 'Unknown',
                 requestedAt: new Date(),
               });
             }
-}
-          // Sort by request time
+          }
+          
+          // Sort by request time safely
           requests.sort((a, b) => {
-            const timeA = a.requestedAt instanceof Date ? a.requestedAt.getTime() : 0;
-            const timeB = b.requestedAt instanceof Date ? b.requestedAt.getTime() : 0;
-            return timeA - timeB;
+            try {
+              const timeA = a.requestedAt instanceof Date ? a.requestedAt.getTime() : 0;
+              const timeB = b.requestedAt instanceof Date ? b.requestedAt.getTime() : 0;
+              return timeA - timeB;
+            } catch (sortError) {
+              console.log('    ⚠️ Error sorting requests');
+              return 0;
+            }
           });
 
           console.log('✅ Successfully processed', requests.length, 'requests');
@@ -350,20 +346,31 @@ const nickname = userData.instagram || userData.nickname || `User-${uid.substrin
           
         } catch (error) {
           console.error('❌ Error processing requests:', error);
+          // Set empty array on error to prevent app crash
           setJoinRequests([]);
+          Alert.alert(
+            'Notice', 
+            'Some user data could not be loaded. You can still manage requests.',
+            [{ text: 'OK' }]
+          );
         }
       } else {
-        console.log('ℹ️ No requests to process (uids.length = 0)');
+        console.log('ℹ️ No requests to process');
         setJoinRequests([]);
       }
     }, 
     (error) => {
       console.error('❌ Room snapshot error:', error);
       setIsLoading(false);
+      Alert.alert(
+        'Error Loading Room',
+        'Could not load room details. Please try again.',
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
     }
   );
 
-  // Participants listener
+  // Participants listener with better error handling
   let unsubscribeParticipants;
   if (auth.currentUser?.uid) {
     console.log('👥 Setting up participants listener...');
@@ -374,42 +381,52 @@ const nickname = userData.instagram || userData.nickname || `User-${uid.substrin
       async (snapshot) => {
         console.log('👥 Participants snapshot received:', snapshot.docs.length, 'participants');
         
-        const currentParticipantUids = participants.map(p => p.uid).sort().join(',');
-        const newParticipantUids = snapshot.docs.map(doc => doc.data().uid).sort().join(',');
-        
-        if (currentParticipantUids !== newParticipantUids) {
-          console.log('🔄 Participants changed, reloading...');
-          
+        try {
           const list = await Promise.all(
             snapshot.docs.map(async (docSnap) => {
               const data = docSnap.data();
-              const userDoc = await getDoc(doc(db, 'users', data.uid));
               
-              if (!userDoc.exists()) {
-                console.log(`⚠️ User document doesn't exist for ${data.uid}`);
+              try {
+                const userDoc = await getDoc(doc(db, 'users', data.uid));
+                
+                if (!userDoc.exists()) {
+                  console.log(`⚠️ User document doesn't exist for ${data.uid}`);
+                  return { 
+                    uid: data.uid, 
+                    nickname: `User-${data.uid.substring(0, 8)}`, 
+                    major: 'Unknown' 
+                  };
+                }
+                
+                const userData = userDoc.data();
+                const nickname = userData?.instagram || userData?.nickname || `User-${data.uid.substring(0, 8)}`;
+                const major = userData?.major || 'Not specified';
+
+                return { uid: data.uid, nickname, major };
+              } catch (userError) {
+                console.error(`Error fetching participant ${data.uid}:`, userError);
                 return { 
                   uid: data.uid, 
-                  nickname: `User-${data.uid.substring(0, 6)}`, 
-                  major: '' 
+                  nickname: `User-${data.uid.substring(0, 8)}`, 
+                  major: 'Unknown' 
                 };
               }
-              
-              const userData = userDoc.data();
-const nickname = userData.instagram || userData.nickname || `User-${data.uid.substring(0, 6)}`;
-              const major = userData.major || '';
-
-              return { uid: data.uid, nickname, major };
             })
           );
           
           console.log('👥 Participants loaded:', list.map(p => p.nickname));
           setParticipants(list);
-        } else {
-          console.log('👥 Participants unchanged, skipping update');
+        } catch (error) {
+          console.error('❌ Error processing participants:', error);
         }
       },
       (error) => {
         console.error('❌ Participants snapshot error:', error);
+        Alert.alert(
+          'Notice',
+          'Could not load some participant data.',
+          [{ text: 'OK' }]
+        );
       }
     );
   } else {
@@ -1169,6 +1186,8 @@ const submitReport = async () => {
     </KeyboardAvoidingView>
   );
 }
+// Replace your entire StyleSheet.create({ ... }) section with this:
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1195,7 +1214,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 3,
     borderColor: '#333',
-    borderTopColor: '#86945f',
+    borderTopColor: '#E8D5DA',
     marginBottom: 16,
   },
   loadingText: {
@@ -1206,7 +1225,7 @@ const styles = StyleSheet.create({
 
   // Header Styles
   header: {
-    backgroundColor: '#000000ff',
+    backgroundColor: '#1a1a1a',
     borderBottomWidth: 1,
     borderBottomColor: '#333',
     paddingTop: Platform.OS === 'ios' ? 0 : 10,
@@ -1232,10 +1251,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   backButtonText: {
-    color: '#86945f',
+    color: '#E8D5DA',
     fontSize: 20,
     fontWeight: '600',
   },
@@ -1250,7 +1269,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   subtitle: {
-    color: '#999',
+    color: '#E8D5DA',
     fontSize: 14,
     fontWeight: '400',
   },
@@ -1266,11 +1285,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   chatToggleButtonActive: {
-    backgroundColor: '#86945f',
-    borderColor: '#86945f',
+    backgroundColor: '#E8D5DA',
+    borderColor: '#E8D5DA',
   },
   chatToggleButtonText: {
     fontSize: 18,
@@ -1283,7 +1302,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   deleteButtonText: {
     fontSize: 16,
@@ -1323,7 +1342,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   closeChatButtonText: {
     color: '#fff',
@@ -1354,14 +1373,14 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   myMessageBubble: {
-    backgroundColor: '#86945f',
+    backgroundColor: '#E8D5DA',
     borderBottomRightRadius: 8,
   },
   otherMessageBubble: {
     backgroundColor: '#2a2a2a',
     borderBottomLeftRadius: 8,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   senderName: {
     color: '#999',
@@ -1408,7 +1427,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     maxHeight: 100,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   inputDisabled: {
     opacity: 0.6,
@@ -1417,7 +1436,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#86945f',
+    backgroundColor: '#E8D5DA',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1443,15 +1462,14 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
 
-  // Card Styles
+  // Card Styles - UPDATED FOR PINK THEME
   infoCard: {
-    backgroundColor: '#292825ff',
+    backgroundColor: '#E8D5DA',
     marginHorizontal: 20,
     marginTop: 20,
     borderRadius: 20,
     padding: 20,
-    borderWidth: 1,
-    borderColor: '#333',
+    borderWidth: 0,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1460,12 +1478,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   cardTitle: {
-    color: '#fff',
+    color: '#2a2a2a',
     fontSize: 18,
     fontWeight: '600',
   },
   creatorBadge: {
-    backgroundColor: '#86945f',
+    backgroundColor: '#9c7a8f',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -1491,13 +1509,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   infoLabel: {
-    color: '#999',
+    color: '#7a6070',
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 2,
   },
   infoValue: {
-    color: '#fff',
+    color: '#2a2a2a',
     fontSize: 15,
     fontWeight: '400',
     lineHeight: 20,
@@ -1525,41 +1543,40 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   participantCountText: {
-    color: '#86945f',
+    color: '#E8D5DA',
     fontSize: 14,
     fontWeight: '600',
   },
   requestCount: {
-    backgroundColor: '#86945f',
+    backgroundColor: '#E8D5DA',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
   },
   requestCountText: {
-    color: '#fff',
+    color: '#2a2a2a',
     fontSize: 14,
     fontWeight: '600',
   },
 
-  // Participant Styles
+  // Participant Styles - UPDATED FOR PINK THEME
   participantsList: {
     gap: 12,
   },
   participantCard: {
-    backgroundColor: '#292825ff',
+    backgroundColor: '#E8D5DA',
     padding: 16,
     borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#333',
+    borderWidth: 0,
   },
   firstParticipantCard: {
-    borderColor: '#86945f',
+    borderColor: '#9c7a8f',
     borderWidth: 2,
   },
   participantLeft: {
@@ -1571,7 +1588,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#86945f',
+    backgroundColor: '#9c7a8f',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -1585,17 +1602,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   participantName: {
-    color: '#fff',
+    color: '#2a2a2a',
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 2,
   },
   clickableUsername: {
     textDecorationLine: 'underline',
-    textDecorationColor: '#86945f',
+    textDecorationColor: '#9c7a8f',
   },
   participantMajor: {
-    color: '#999',
+    color: '#7a6070',
     fontSize: 14,
     fontWeight: '400',
   },
@@ -1609,7 +1626,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 12,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#FF3B30',
     minWidth: 32,
@@ -1623,10 +1640,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   hostBadge: {
-    color: '#86945f',
+    color: '#9c7a8f',
   },
   youBadge: {
-    color: '#86945f',
+    color: '#9c7a8f',
   },
   kickButton: {
     backgroundColor: '#dc2626',
@@ -1640,9 +1657,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Request Styles
+  // Request Styles - UPDATED FOR PINK THEME
   approveAllButton: {
-    backgroundColor: '#16a34a',
+    backgroundColor: '#9c7a8f',
     padding: 12,
     borderRadius: 12,
     alignItems: 'center',
@@ -1657,14 +1674,14 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   requestCard: {
-    backgroundColor: '#292825ff',
+    backgroundColor: '#E8D5DA',
     padding: 16,
     borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#86945f',
+    borderWidth: 2,
+    borderColor: '#9c7a8f',
   },
   requestLeft: {
     flexDirection: 'row',
@@ -1675,12 +1692,11 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#86945f',
+    backgroundColor: '#9c7a8f',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
-    borderWidth: 1,
-    borderColor: '#333',
+    borderWidth: 0,
   },
   requestAvatarText: {
     color: '#fff',
@@ -1691,13 +1707,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   requestName: {
-    color: '#fff',
+    color: '#2a2a2a',
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 2,
   },
   requestMajor: {
-    color: '#999',
+    color: '#7a6070',
     fontSize: 14,
     fontWeight: '400',
   },
@@ -1732,28 +1748,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Join Section Styles
+  // Join Section Styles - UPDATED FOR PINK THEME
   joinPrompt: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#E8D5DA',
     padding: 24,
     borderRadius: 20,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#333',
+    borderWidth: 0,
   },
   joinPromptIcon: {
     fontSize: 32,
     marginBottom: 12,
   },
   joinPromptText: {
-    color: '#fff',
+    color: '#2a2a2a',
     fontSize: 18,
     fontWeight: '500',
     marginBottom: 20,
     textAlign: 'center',
   },
   joinButton: {
-    backgroundColor: '#86945f',
+    backgroundColor: '#9c7a8f',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 16,
@@ -1781,37 +1796,38 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   cancelRequestButton: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#fff',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#9c7a8f',
   },
   cancelRequestButtonText: {
-    color: '#fff',
+    color: '#2a2a2a',
     fontSize: 14,
     fontWeight: '500',
   },
 
-  // Empty State Styles
+  // Empty State Styles - UPDATED FOR PINK THEME
   emptyState: {
     alignItems: 'center',
     padding: 32,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#E8D5DA',
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#333',
+    borderWidth: 0,
   },
   emptyIcon: {
     fontSize: 32,
     marginBottom: 8,
   },
   emptyText: {
-    color: '#999',
+    color: '#7a6070',
     fontSize: 16,
     fontWeight: '400',
   },
+  
+  // Report Modal Styles
   reportModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -1828,7 +1844,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 400,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   reportModalHeader: {
     flexDirection: 'row',
@@ -1849,7 +1865,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   reportModalCloseText: {
     color: '#fff',
@@ -1857,7 +1873,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   reportModalSubtitle: {
-    color: '#86945f',
+    color: '#E8D5DA',
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 20,
@@ -1872,7 +1888,7 @@ const styles = StyleSheet.create({
     minHeight: 120,
     textAlignVertical: 'top',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
     marginBottom: 24,
   },
   reportModalButtons: {
@@ -1886,7 +1902,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#444',
   },
   reportCancelButtonText: {
     color: '#fff',
