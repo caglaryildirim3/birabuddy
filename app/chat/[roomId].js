@@ -1,11 +1,11 @@
+import { Ionicons } from '@expo/vector-icons'; // Added for better icons
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { onAuthStateChanged } from 'firebase/auth';
 import { addDoc, collection, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, StyleSheet, Text, TextInput, TouchableWithoutFeedback, View } from 'react-native';
 import { auth, db } from '../../firebase/firebaseConfig';
 import { useButtonDelay } from '../../hooks/useButtonDelay';
-import { onAuthStateChanged } from 'firebase/auth';
-import { Ionicons } from '@expo/vector-icons'; // Added for better icons
 
 export default function ChatRoom() {
   const { roomId } = useLocalSearchParams();
