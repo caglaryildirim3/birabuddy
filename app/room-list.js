@@ -1,20 +1,18 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  addDoc,
   arrayUnion,
   collection,
   deleteDoc,
   doc,
-  getDoc,
   onSnapshot,
   serverTimestamp,
-  updateDoc,
+  updateDoc
 } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  Dimensions,
   FlatList,
   Modal,
   Pressable,
@@ -26,7 +24,9 @@ import {
   View
 } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
-import { Ionicons } from '@expo/vector-icons';
+
+// Defined outside the component to prevent re-creation
+const NEIGHBORHOODS = ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'];
 
 export default function JoinRoom() {
   const [rooms, setRooms] = useState([]);
@@ -36,14 +36,22 @@ export default function JoinRoom() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // --- FILTER STATES ---
+  // --- MODAL VISIBILITY ---
   const [isFilterVisible, setIsFilterVisible] = useState(false);
-  const [filterName, setFilterName] = useState('');
-  const [filterLocation, setFilterLocation] = useState('');
-  const [filterDay, setFilterDay] = useState(null);
-  const [filterTimeStart, setFilterTimeStart] = useState(null);
 
-  // Next 7 Days for Filter
+  // --- ACTIVE FILTERS (Used to filter the list) ---
+  const [activeName, setActiveName] = useState('');
+  const [activeLocations, setActiveLocations] = useState([]); // Array for multiple selections
+  const [activeDay, setActiveDay] = useState(null);
+  const [activeTimeStart, setActiveTimeStart] = useState(null);
+
+  // --- TEMPORARY FILTERS (Used inside the modal while selecting) ---
+  const [tempName, setTempName] = useState('');
+  const [tempLocations, setTempLocations] = useState([]);
+  const [tempDay, setTempDay] = useState(null);
+  const [tempTimeStart, setTempTimeStart] = useState(null);
+
+  // Prepare filter data
   const next7Days = useMemo(() => {
     const days = [];
     for (let i = 0; i < 7; i++) {
@@ -57,7 +65,6 @@ export default function JoinRoom() {
     return days;
   }, []);
 
-  // Time Slots for Filter
   const timeSlots = [
     { label: '18:00-19:00', start: 18 },
     { label: '19:00-20:00', start: 19 },
@@ -67,10 +74,11 @@ export default function JoinRoom() {
     { label: '23:00-00:00', start: 23 },
   ];
 
+  // --- HELPER FUNCTIONS ---
+
   const formatDateTimeShort = (dateStr, timeStr) => {
     if (!dateStr || !timeStr) return 'unknown';
     const date = new Date(`${dateStr}T${timeStr}`);
-    // Format: "Fri, Nov 15 • 19:30"
     return date.toLocaleString('en-US', {
       weekday: 'short',
       month: 'short',
@@ -81,6 +89,42 @@ export default function JoinRoom() {
     }) + ' • ' + timeStr;
   };
 
+  // Handle opening the modal (sync temp state with active state)
+  const openFilterModal = () => {
+    setTempName(activeName);
+    setTempLocations([...activeLocations]);
+    setTempDay(activeDay);
+    setTempTimeStart(activeTimeStart);
+    setIsFilterVisible(true);
+  };
+
+  // Handle applying filters (sync active state with temp state)
+  const applyFilters = () => {
+    setActiveName(tempName);
+    setActiveLocations(tempLocations);
+    setActiveDay(tempDay);
+    setActiveTimeStart(tempTimeStart);
+    setIsFilterVisible(false);
+  };
+
+  // Handle clearing filters inside modal
+  const clearFilters = () => {
+    setTempName('');
+    setTempLocations([]);
+    setTempDay(null);
+    setTempTimeStart(null);
+  };
+
+  // Toggle a neighborhood in the temp array
+  const toggleNeighborhood = (neighborhood) => {
+    if (tempLocations.includes(neighborhood)) {
+      setTempLocations(tempLocations.filter(loc => loc !== neighborhood));
+    } else {
+      setTempLocations([...tempLocations, neighborhood]);
+    }
+  };
+
+  // --- DATA FETCHING ---
   useEffect(() => {
     let unsubscribe = null;
     let participantUnsubscribes = [];
@@ -165,7 +209,7 @@ export default function JoinRoom() {
     };
   }, []);
 
-  // --- FILTER LOGIC ---
+  // --- MAIN FILTERING LOGIC (Uses active... states) ---
   const availableRooms = useMemo(() => {
     let filtered = rooms.filter((room) => {
       const max = room.maxParticipants || 0;
@@ -174,16 +218,30 @@ export default function JoinRoom() {
       
       if (current >= max || isUserInRoom) return false;
 
-      if (filterName && !room.name.toLowerCase().includes(filterName.toLowerCase())) return false;
+      // 1. Name Filter
+      if (activeName && !room.name.toLowerCase().includes(activeName.toLowerCase())) return false;
 
-      const loc = room.neighborhood || room.location || '';
-      if (filterLocation && !loc.toLowerCase().includes(filterLocation.toLowerCase())) return false;
+      // 2. Location Filter (Multi-select)
+      // If activeLocations has items, the room's neighborhood MUST be one of them.
+      if (activeLocations.length > 0) {
+        const roomLoc = (room.neighborhood || room.location || '').toLowerCase();
+        // We check if the room location includes any of the selected neighborhoods
+        // or if the exact neighborhood string is in the list.
+        // Since data might be "besiktas", and filter is "besiktas", exact match is best,
+        // but case-insensitive check is safer.
+        const match = activeLocations.some(selectedLoc => 
+          roomLoc.includes(selectedLoc.toLowerCase())
+        );
+        if (!match) return false;
+      }
 
-      if (filterDay && room.date !== filterDay) return false;
+      // 3. Day Filter
+      if (activeDay && room.date !== activeDay) return false;
 
-      if (filterTimeStart !== null) {
+      // 4. Time Filter
+      if (activeTimeStart !== null) {
         const roomHour = parseInt(room.time.split(':')[0], 10);
-        if (roomHour !== filterTimeStart) return false;
+        if (roomHour !== activeTimeStart) return false;
       }
 
       return true;
@@ -195,7 +253,7 @@ export default function JoinRoom() {
       }
       return 0;
     });
-  }, [rooms, participantCounts, userParticipations, filterName, filterLocation, filterDay, filterTimeStart]);
+  }, [rooms, participantCounts, userParticipations, activeName, activeLocations, activeDay, activeTimeStart]);
 
   const handleRequest = async (roomId, requests = []) => {
     if (!currentUser) return;
@@ -220,7 +278,6 @@ export default function JoinRoom() {
         style={styles.card}
         onPress={() => router.push(`/room-details/${item.id}`)}
       >
-        {/* Left Side: Info */}
         <View style={styles.cardLeft}>
           <Text style={styles.title} numberOfLines={1}>{item.name}</Text>
           <View style={styles.infoRow}>
@@ -233,7 +290,6 @@ export default function JoinRoom() {
           </View>
         </View>
 
-        {/* Right Side: Action & Count */}
         <View style={styles.cardRight}>
           <View style={styles.countContainer}>
             <Ionicons name="people" size={16} color="#3A6A6F" />
@@ -260,91 +316,6 @@ export default function JoinRoom() {
     );
   };
 
-  // --- FILTER MODAL COMPONENT ---
-  const FilterModal = () => (
-    <Modal
-      animationType="slide"
-      transparent={true}
-      visible={isFilterVisible}
-      onRequestClose={() => setIsFilterVisible(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Filter Rooms</Text>
-            <Pressable onPress={() => setIsFilterVisible(false)}>
-              <Ionicons name="close" size={24} color="#4A3B47" />
-            </Pressable>
-          </View>
-          
-          <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={styles.filterLabel}>Room Name</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="e.g. Chill drinks" 
-              value={filterName}
-              onChangeText={setFilterName}
-            />
-
-            <Text style={styles.filterLabel}>Location</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="e.g. Kadikoy"
-              value={filterLocation}
-              onChangeText={setFilterLocation}
-            />
-
-            <Text style={styles.filterLabel}>Day</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-              <Pressable 
-                style={[styles.chip, filterDay === null && styles.chipActive]}
-                onPress={() => setFilterDay(null)}
-              >
-                <Text style={[styles.chipText, filterDay === null && styles.chipTextActive]}>Any</Text>
-              </Pressable>
-              {next7Days.map((day) => (
-                <Pressable
-                  key={day.value}
-                  style={[styles.chip, filterDay === day.value && styles.chipActive]}
-                  onPress={() => setFilterDay(day.value === filterDay ? null : day.value)}
-                >
-                  <Text style={[styles.chipText, filterDay === day.value && styles.chipTextActive]}>
-                    {day.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-
-            <Text style={styles.filterLabel}>Time Interval</Text>
-            <View style={styles.wrapContainer}>
-              <Pressable 
-                style={[styles.chip, filterTimeStart === null && styles.chipActive]}
-                onPress={() => setFilterTimeStart(null)}
-              >
-                <Text style={[styles.chipText, filterTimeStart === null && styles.chipTextActive]}>Any</Text>
-              </Pressable>
-              {timeSlots.map((slot) => (
-                <Pressable
-                  key={slot.start}
-                  style={[styles.chip, filterTimeStart === slot.start && styles.chipActive]}
-                  onPress={() => setFilterTimeStart(slot.start === filterTimeStart ? null : slot.start)}
-                >
-                  <Text style={[styles.chipText, filterTimeStart === slot.start && styles.chipTextActive]}>
-                    {slot.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
-
-          <Pressable style={styles.applyButton} onPress={() => setIsFilterVisible(false)}>
-            <Text style={styles.applyButtonText}>Show Results</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  );
-
   if (loading || !currentUser) {
     return (
       <SafeAreaView style={styles.container}>
@@ -358,22 +329,123 @@ export default function JoinRoom() {
     <SafeAreaView style={styles.container}>
       <View style={styles.topRow}>
         <Text style={styles.header}>join a meetup 🍻</Text>
-        <Pressable style={styles.filterIconBtn} onPress={() => setIsFilterVisible(true)}>
+        <Pressable style={styles.filterIconBtn} onPress={openFilterModal}>
           <Ionicons name="filter" size={24} color="#E1B604" />
         </Pressable>
       </View>
 
-      <FilterModal />
+      {/* --- MODAL IS NOW DIRECTLY IN RENDER --- */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={isFilterVisible}
+        onRequestClose={() => setIsFilterVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter Rooms</Text>
+              <Pressable onPress={() => setIsFilterVisible(false)}>
+                <Ionicons name="close" size={24} color="#4A3B47" />
+              </Pressable>
+            </View>
+            
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* 1. NAME */}
+              <Text style={styles.filterLabel}>Room Name</Text>
+              <TextInput 
+                style={styles.input} 
+                placeholder="Search by name..." 
+                value={tempName}
+                onChangeText={setTempName}
+              />
+
+              {/* 2. NEIGHBORHOODS (Multi-Select) */}
+              <Text style={styles.filterLabel}>Neighborhoods</Text>
+              <View style={styles.wrapContainer}>
+                {NEIGHBORHOODS.map((hood) => {
+                  const isSelected = tempLocations.includes(hood);
+                  return (
+                    <Pressable
+                      key={hood}
+                      style={[styles.chip, isSelected && styles.chipActive]}
+                      onPress={() => toggleNeighborhood(hood)}
+                    >
+                      <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
+                        {hood}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              {/* 3. DAY */}
+              <Text style={styles.filterLabel}>Day</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+                <Pressable 
+                  style={[styles.chip, tempDay === null && styles.chipActive]}
+                  onPress={() => setTempDay(null)}
+                >
+                  <Text style={[styles.chipText, tempDay === null && styles.chipTextActive]}>Any</Text>
+                </Pressable>
+                {next7Days.map((day) => (
+                  <Pressable
+                    key={day.value}
+                    style={[styles.chip, tempDay === day.value && styles.chipActive]}
+                    onPress={() => setTempDay(day.value === tempDay ? null : day.value)}
+                  >
+                    <Text style={[styles.chipText, tempDay === day.value && styles.chipTextActive]}>
+                      {day.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              {/* 4. TIME */}
+              <Text style={styles.filterLabel}>Time Interval</Text>
+              <View style={styles.wrapContainer}>
+                <Pressable 
+                  style={[styles.chip, tempTimeStart === null && styles.chipActive]}
+                  onPress={() => setTempTimeStart(null)}
+                >
+                  <Text style={[styles.chipText, tempTimeStart === null && styles.chipTextActive]}>Any</Text>
+                </Pressable>
+                {timeSlots.map((slot) => (
+                  <Pressable
+                    key={slot.start}
+                    style={[styles.chip, tempTimeStart === slot.start && styles.chipActive]}
+                    onPress={() => setTempTimeStart(slot.start === tempTimeStart ? null : slot.start)}
+                  >
+                    <Text style={[styles.chipText, tempTimeStart === slot.start && styles.chipTextActive]}>
+                      {slot.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <Pressable style={styles.clearButton} onPress={clearFilters}>
+                <Text style={styles.clearButtonText}>Clear All</Text>
+              </Pressable>
+              <Pressable style={styles.applyButton} onPress={applyFilters}>
+                <Text style={styles.applyButtonText}>Show Results</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {availableRooms.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>no rooms found</Text>
           <Pressable 
              onPress={() => {
-               setFilterName(''); 
-               setFilterLocation(''); 
-               setFilterDay(null); 
-               setFilterTimeStart(null);
+               // Clear Active Filters directly
+               setActiveName('');
+               setActiveLocations([]);
+               setActiveDay(null);
+               setActiveTimeStart(null);
              }}
           >
             <Text style={{color: '#E1B604', marginTop: 10}}>Clear Filters</Text>
@@ -384,8 +456,6 @@ export default function JoinRoom() {
           data={availableRooms}
           keyExtractor={(item) => item.id}
           renderItem={renderRoom}
-          // Removed numColumns (default is 1)
-          // Removed horizontal props
           contentContainerStyle={styles.flatListContent}
           showsVerticalScrollIndicator={false}
         />
@@ -420,13 +490,12 @@ const styles = StyleSheet.create({
   flatListContent: {
     paddingBottom: 100,
   },
-  // --- NEW WIDE CARD STYLES ---
   card: {
     backgroundColor: '#E8D5DA',
-    marginHorizontal: 20, // Side spacing
-    marginBottom: 12,     // Spacing between cards
+    marginHorizontal: 20, 
+    marginBottom: 12,     
     borderRadius: 12,
-    flexDirection: 'row', // Organize content Left/Right
+    flexDirection: 'row', 
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
@@ -438,11 +507,11 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   cardLeft: {
-    flex: 1, // Take up remaining space
+    flex: 1, 
     marginRight: 10,
   },
   cardRight: {
-    alignItems: 'flex-end', // Align button/count to the right
+    alignItems: 'flex-end', 
     justifyContent: 'space-between',
     minWidth: 70,
   },
@@ -462,6 +531,7 @@ const styles = StyleSheet.create({
     color: '#4d4c41',
     marginLeft: 4,
     fontWeight: '600',
+    textTransform: 'capitalize',
   },
   time: {
     fontSize: 13,
@@ -521,7 +591,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 25,
     borderTopRightRadius: 25,
     padding: 20,
-    height: '70%',
+    height: '85%', // Slightly taller for more filters
   },
   modalHeader: {
     flexDirection: 'row',
@@ -572,18 +642,37 @@ const styles = StyleSheet.create({
   chipText: {
     color: '#4A3B47',
     fontSize: 12,
+    textTransform: 'capitalize',
   },
   chipTextActive: {
     color: '#FFF',
     fontWeight: 'bold',
   },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  clearButton: {
+    flex: 0.3,
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#4A3B47',
+  },
+  clearButtonText: {
+    color: '#4A3B47',
+    fontWeight: 'bold',
+  },
   applyButton: {
+    flex: 0.65,
     backgroundColor: '#4A3B47',
     padding: 15,
     borderRadius: 12,
     alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 20,
   },
   applyButtonText: {
     color: '#E1B604',

@@ -2,8 +2,9 @@ import { View, Text, StyleSheet, ScrollView, Pressable, Dimensions, Alert } from
 import { useRouter } from 'expo-router';
 import { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
-import { auth, db } from '../firebase/firebaseConfig'; // adjust path if needed
+import { auth, db } from '../firebase/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
+import { Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 
@@ -14,7 +15,6 @@ export default function Notifications() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Format timestamp to readable time
   const formatTime = useCallback((timestamp) => {
     if (!timestamp) return 'Unknown time';
     
@@ -33,27 +33,23 @@ export default function Notifications() {
     return notificationTime.toLocaleDateString();
   }, []);
 
-  // Firebase listener for real-time notifications
  useEffect(() => {
   let unsubscribe = null;
 
   const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
-    // Clean up existing listener
     if (unsubscribe) unsubscribe();
 
     if (!currentUser || !currentUser.emailVerified) {
-      // User not authenticated, clear notifications
       setNotifications([]);
       setLoading(false);
       return;
     }
 
-    // User is authenticated, start listening to notifications
     setLoading(true);
     
     const notificationsQuery = query(
       collection(db, 'notifications'),
-      where('userId', '==', currentUser.uid), // assuming you filter by userId
+      where('userId', '==', currentUser.uid),
       orderBy('createdAt', 'desc')
     );
 
@@ -82,10 +78,8 @@ export default function Notifications() {
   };
 }, [formatTime]);
 
-  // Mark notification as read
   const markAsRead = useCallback(async (notificationId) => {
     try {
-      // Update local state immediately for better UX
       setNotifications(prev => 
         prev.map(notif => 
           notif.id === notificationId 
@@ -94,7 +88,6 @@ export default function Notifications() {
         )
       );
 
-      // Update in Firebase
       const notificationRef = doc(db, 'notifications', notificationId);
       await updateDoc(notificationRef, {
         read: true,
@@ -103,7 +96,6 @@ export default function Notifications() {
 
     } catch (error) {
       console.error('Error marking notification as read:', error);
-      // Revert local state if Firebase update fails
       setNotifications(prev => 
         prev.map(notif => 
           notif.id === notificationId 
@@ -114,10 +106,8 @@ export default function Notifications() {
     }
   }, []);
 
-  // Get notification icon based on type
   const getNotificationIcon = useCallback((type) => {
     const icons = {
-      // New room-related notification types
       'join_request': '👋',
       'join_approved': '✅',
       'join_rejected': '❌',
@@ -128,7 +118,6 @@ export default function Notifications() {
       'study_reminder': '⏰',
       'user_joined': '🎉',
       'user_left': '👋',
-      // Legacy meetup types (for backward compatibility)
       'meetup_request': '👋',
       'meetup_accepted': '✅',
       'meetup_reminder': '⏰',
@@ -139,16 +128,12 @@ export default function Notifications() {
     return icons[type] || icons.default;
   }, []);
 
-  // Clear all notifications
   const clearAllNotifications = useCallback(() => {
     Alert.alert(
       'Clear All Notifications',
       'Are you sure you want to clear all notifications? This action cannot be undone.',
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear All',
           style: 'destructive',
@@ -163,8 +148,6 @@ export default function Notifications() {
                 });
                 await batch.commit();
               }
-
-              // Clear local state
               setNotifications([]);
             } catch (error) {
               console.error('Error clearing notifications:', error);
@@ -176,37 +159,24 @@ export default function Notifications() {
     );
   }, [notifications]);
 
-  // Handle notification press (navigate to relevant screen)
   const handleNotificationPress = useCallback((notification) => {
     markAsRead(notification.id);
     
-    // Navigate based on notification type
     switch (notification.type) {
       case 'join_request':
-  // Navigate to room details page where host can see join requests
-  if (notification.roomId) {
-    router.push(`/room-details/${notification.roomId}`);
-  }
-  break;
-  
-case 'join_approved':
-case 'join_rejected':
-case 'room_invitation':
-case 'study_reminder':
-  // Navigate to the specific room
-  if (notification.roomId) {
-    router.push(`/room-details/${notification.roomId}`);
-  }
-  break;
-        
+        if (notification.roomId) router.push(`/room-details/${notification.roomId}`);
+        break;
+      case 'join_approved':
+      case 'join_rejected':
+      case 'room_invitation':
+      case 'study_reminder':
+        if (notification.roomId) router.push(`/room-details/${notification.roomId}`);
+        break;
       case 'room_deleted':
       case 'kicked_from_room':
-        // Navigate back to rooms list since room no longer exists or user was kicked
         router.push('/room-list');
         break;
-        
       case 'new_message':
-        // Navigate to room and try to open chat
         if (notification.roomId) {
           router.push({
             pathname: `/room-details/${notification.roomId}`,
@@ -214,34 +184,26 @@ case 'study_reminder':
           });
         }
         break;
-        
       case 'user_joined':
       case 'user_left':
-        // Navigate to the room where user joined/left
         if (notification.roomId) {
           router.push(`/room-details/${notification.roomId}`);
         } else if (notification.userId) {
           router.push(`/my-profile/${notification.userId}`);
         }
         break;
-
-      // Legacy meetup types (for backward compatibility)
       case 'meetup_request':
       case 'meetup_accepted':
       case 'meetup_reminder':
       case 'meetup_cancelled':
       case 'meetup_updated':
-        // Handle old meetup notifications - convert roomId from meetupId if needed
         if (notification.meetupId) {
           router.push(`/room-details/${notification.meetupId}`);
         } else if (notification.roomId) {
           router.push(`/room-details/${notification.roomId}`);
         }
         break;
-        
       default:
-        // Just mark as read for other types
-        console.log('Unknown notification type:', notification.type);
         break;
     }
   }, [markAsRead, router]);
@@ -251,7 +213,7 @@ case 'study_reminder':
       <View style={styles.container}>
         <View style={styles.header}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backButtonText}>← back</Text>
+            <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
           </Pressable>
           <Text style={styles.title}>notifications</Text>
         </View>
@@ -267,7 +229,7 @@ case 'study_reminder':
       <View style={styles.container}>
         <View style={styles.header}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backButtonText}>← back</Text>
+             <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
           </Pressable>
           <Text style={styles.title}>notifications</Text>
         </View>
@@ -278,7 +240,6 @@ case 'study_reminder':
           <Pressable style={styles.retryButton} onPress={() => {
             setError(null);
             setLoading(true);
-            // Trigger re-fetch by updating a state that useEffect depends on
           }}>
             <Text style={styles.retryButtonText}>Try Again</Text>
           </Pressable>
@@ -292,7 +253,7 @@ case 'study_reminder':
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>← back</Text>
+          <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
         </Pressable>
         <Text style={styles.title}>notifications</Text>
         {notifications.length > 0 && (
@@ -323,25 +284,25 @@ case 'study_reminder':
                 !notification.read && styles.unreadCard
               ]}
               onPress={() => handleNotificationPress(notification)}
-              accessibilityRole="button"
-              accessibilityLabel={`${notification.title}: ${notification.message}`}
             >
               <View style={styles.notificationHeader}>
                 <Text style={styles.notificationIcon}>
                   {getNotificationIcon(notification.type)}
                 </Text>
                 <View style={styles.notificationContent}>
-                  <Text style={[
-                    styles.notificationTitle,
-                    !notification.read && styles.unreadTitle
-                  ]}>
-                    {notification.title}
-                  </Text>
+                  <View style={styles.titleRow}>
+                    <Text style={[
+                      styles.notificationTitle,
+                      !notification.read && styles.unreadTitle
+                    ]}>
+                      {notification.title}
+                    </Text>
+                    {!notification.read && <View style={styles.unreadDot} />}
+                  </View>
                   <Text style={styles.notificationTime}>
                     {notification.time || formatTime(notification.createdAt)}
                   </Text>
                 </View>
-                {!notification.read && <View style={styles.unreadDot} />}
               </View>
               <Text style={styles.notificationMessage}>
                 {notification.message}
@@ -357,50 +318,41 @@ case 'study_reminder':
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1C6F75',
+    backgroundColor: '#4A3B47', // Main background matches room-list
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     paddingTop: 60,
     paddingBottom: 20,
   },
   backButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    minWidth: 60,
-  },
-  backButtonText: {
-    color: '#DCD8A7',
-    fontSize: 16,
-    fontWeight: '500',
+    padding: 8,
   },
   title: {
     fontSize: 24,
-    fontWeight: '600',
-    color: '#DCD8A7',
+    fontWeight: 'bold',
+    color: '#E8A4C7', // Pink title
     textAlign: 'center',
     flex: 1,
   },
   clearButton: {
     paddingVertical: 8,
     paddingHorizontal: 12,
-    minWidth: 60,
   },
   clearButtonText: {
-    color: '#E1B604',
+    color: '#E1B604', // Mustard yellow accent
     fontSize: 14,
-    fontWeight: '500',
-    textAlign: 'right',
+    fontWeight: 'bold',
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 24,
-    paddingBottom: 40, // Extra padding for bottom safe area
+    padding: 20,
+    paddingBottom: 40,
   },
   loadingContainer: {
     flex: 1,
@@ -409,8 +361,9 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: '#B8D4D6',
+    color: '#E8A4C7',
   },
+  // Error States
   errorContainer: {
     flex: 1,
     alignItems: 'center',
@@ -424,13 +377,12 @@ const styles = StyleSheet.create({
   errorTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#DCD8A7',
+    color: '#E8A4C7',
     marginBottom: 8,
-    textAlign: 'center',
   },
   errorMessage: {
     fontSize: 16,
-    color: '#B8D4D6',
+    color: '#ccc',
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -438,13 +390,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#E1B604',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 12,
   },
   retryButtonText: {
     color: '#1C6F75',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
+  // Empty State
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -457,25 +410,32 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#DCD8A7',
+    color: '#E8A4C7',
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 16,
-    color: '#B8D4D6',
+    color: '#ccc',
     textAlign: 'center',
   },
+  // Cards matching room-list style
   notificationCard: {
-    backgroundColor: 'rgba(220, 216, 167, 0.1)',
+    backgroundColor: '#E8D5DA', // Light card background
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(220, 216, 167, 0.2)',
+    borderColor: '#3A6A6F', // Dark teal border
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   unreadCard: {
-    backgroundColor: 'rgba(225, 182, 4, 0.15)',
-    borderColor: 'rgba(225, 182, 4, 0.3)',
+    backgroundColor: '#fff', // Brighter background for unread
+    borderColor: '#E1B604', // Yellow border for emphasis
+    borderWidth: 2,
   },
   notificationHeader: {
     flexDirection: 'row',
@@ -483,37 +443,44 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   notificationIcon: {
-    fontSize: 20,
+    fontSize: 24,
     marginRight: 12,
-    marginTop: 2,
   },
   notificationContent: {
     flex: 1,
   },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
   notificationTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#DCD8A7',
+    fontWeight: 'bold',
+    color: '#4d4c41', // Dark text for readability
+    flex: 1,
     marginBottom: 4,
   },
   unreadTitle: {
-    color: '#E1B604',
+    color: '#3A6A6F',
   },
   notificationTime: {
     fontSize: 12,
-    color: '#B8D4D6',
+    color: '#666',
+    marginTop: 2,
   },
   unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#E1B604',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#E1B604', // Mustard dot
     marginLeft: 8,
-    marginTop: 6,
+    marginTop: 4,
   },
   notificationMessage: {
     fontSize: 14,
-    color: '#B8D4D6',
+    color: '#4d4c41',
     lineHeight: 20,
+    marginTop: 4,
   },
 });

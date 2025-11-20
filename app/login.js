@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { signInWithEmailAndPassword, signOut, sendEmailVerification, sendPasswordResetEmail } from 'firebase/auth'; // 👈 ADDED sendPasswordResetEmail
+import { signInWithEmailAndPassword, signOut, sendEmailVerification, sendPasswordResetEmail } from 'firebase/auth';
 import { auth, db } from '../firebase/firebaseConfig';
 import { Link, useRouter } from 'expo-router';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -10,14 +10,15 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
-  const [forgotLoading, setForgotLoading] = useState(false); // 👈 ADDED forgot password loading state
+  const [forgotLoading, setForgotLoading] = useState(false);
   const router = useRouter();
 
-  const allowedDomain = "@std.bogazici.edu.tr";
-
+  // Updated validation to accept ANY .edu.tr domain
   const validateEmail = (email) => {
-    // Check if email ends with allowed domain (case insensitive)
-    if (!email.toLowerCase().endsWith(allowedDomain.toLowerCase())) {
+    const emailLower = email.toLowerCase();
+
+    // Check if email ends with .edu.tr
+    if (!emailLower.endsWith('.edu.tr')) {
       return false;
     }
     
@@ -26,7 +27,6 @@ export default function Login() {
     return emailRegex.test(email);
   };
 
-  // 👈 ADDED forgot password function
   const handleForgotPassword = async () => {
     const trimmedEmail = email.trim();
     
@@ -39,7 +39,7 @@ export default function Login() {
     if (!validateEmail(trimmedEmail)) {
       Alert.alert(
         'Invalid Email',
-        `Please use your Boğaziçi University student email (${allowedDomain})`
+        'Please use a valid university student email ending in .edu.tr'
       );
       return;
     }
@@ -128,7 +128,7 @@ export default function Login() {
     if (!validateEmail(trimmedEmail)) {
       Alert.alert(
         'Invalid Email',
-        `Please use your Boğaziçi University student email (${allowedDomain})`
+        'Please use a valid university student email ending in .edu.tr'
       );
       return;
     }
@@ -205,7 +205,7 @@ export default function Login() {
       
       <TextInput
         style={styles.input}
-        placeholder="student email (@std.bogazici.edu.tr)"
+        placeholder="student email (ending with .edu.tr)"
         placeholderTextColor="#aaa"
         value={email}
         onChangeText={setEmail}
@@ -236,7 +236,6 @@ export default function Login() {
         )}
       </Pressable>
 
-      {/* 👈 ADDED forgot password button */}
       <Pressable 
         style={[styles.forgotButton, forgotLoading && styles.buttonDisabled]} 
         onPress={handleForgotPassword}
@@ -249,7 +248,6 @@ export default function Login() {
         )}
       </Pressable>
 
-      {/* Standalone resend button */}
       <Pressable 
         style={[styles.resendButton, resendLoading && styles.buttonDisabled]} 
         onPress={handleResendVerification}
@@ -323,7 +321,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  // 👈 ADDED forgot password button styles
   forgotButton: {
     backgroundColor: 'transparent',
     padding: 8,
