@@ -32,6 +32,7 @@ import {
 import UserProfile from '../../components/UserProfile';
 import { auth, db } from '../../firebase/firebaseConfig';
 import { useButtonDelay } from '../../hooks/useButtonDelay';
+import { Ionicons } from '@expo/vector-icons'; // Added Ionicons for better icons
 
 export default function RoomDetails() {
   const { id } = useLocalSearchParams();
@@ -48,8 +49,8 @@ export default function RoomDetails() {
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [reportModalVisible, setReportModalVisible] = useState(false);
-const [reportedUser, setReportedUser] = useState(null);
-const [reportReason, setReportReason] = useState('');
+  const [reportedUser, setReportedUser] = useState(null);
+  const [reportReason, setReportReason] = useState('');
 
   // Chat state
   const [message, setMessage] = useState('');
@@ -57,14 +58,12 @@ const [reportReason, setReportReason] = useState('');
   const [showChat, setShowChat] = useState(false);
   const flatListRef = useRef(null);
 
-  // Date/Time formatting functions (keeping your existing ones)
+  // Date/Time formatting functions
   const formatDateString = (dateString) => {
     if (!dateString || typeof dateString !== 'string') return 'Not specified';
-    
     try {
       const [year, month, day] = dateString.split('-');
       const date = new Date(year, month - 1, day);
-      
       return date.toLocaleDateString('tr-TR', {
         day: '2-digit',
         month: '2-digit',
@@ -81,27 +80,21 @@ const [reportReason, setReportReason] = useState('');
     return timeString;
   };
 
-  // NEW: Get display location based on participant status
   const getDisplayLocation = () => {
     if (!room) return 'Not specified';
-    
-    // Show full location for participants AND creator
-      if (isParticipant || isCreator) {
+    if (isParticipant || isCreator) {
       if (room.barName && room.neighborhood) {
         return `${room.barName}, ${room.neighborhood}`;
       } else if (room.fullLocation) {
         return room.fullLocation;
       } else if (room.location) {
-        // Fallback for old rooms that still use 'location' field
         return room.location;
       }
       return 'Location details will be shared';
     } else {
-      // Show only neighborhood for non-participants
       if (room.neighborhood) {
         return `${room.neighborhood} (exact location shared after joining)`;
       } else if (room.location) {
-        // Extract neighborhood from old location format if possible
         return `${room.location} area (exact location shared after joining)`;
       }
       return 'Location shared after joining';
@@ -111,46 +104,41 @@ const [reportReason, setReportReason] = useState('');
   // Chat functionality
   useEffect(() => {
     if (!id || !isParticipant || !showChat) return;
-
     const messagesRef = collection(db, 'rooms', id, 'messages');
     const q = query(messagesRef, orderBy('createdAt'));
-
     const unsubscribe = onSnapshot(q, snapshot => {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMessages(msgs);
     });
-
     return () => unsubscribe();
   }, [id, isParticipant, showChat]);
 
   const handleSend = async () => {
-  if (message.trim() === '') return;
+    if (message.trim() === '') return;
+    try {
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const userData = userDoc.exists() ? userDoc.data() : {};
+      const nickname = userData.instagram || userData.nickname || 'unknown';
+      const messagesRef = collection(db, 'rooms', id, 'messages');
+      await addDoc(messagesRef, {
+        text: message,
+        sender: nickname,
+        uid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+      setMessage('');
+      flatListRef.current?.scrollToEnd({ animated: true });
+    } catch (error) {
+      console.error('Error sending message:', error);
+      Alert.alert('Error', 'Failed to send message');
+    }
+  };
 
-  try {
-    const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-const userData = userDoc.exists() ? userDoc.data() : {};
-const nickname = userData.instagram || userData.nickname || 'unknown';
-
-    const messagesRef = collection(db, 'rooms', id, 'messages');
-    await addDoc(messagesRef, {
-      text: message,
-      sender: nickname,
-      uid: auth.currentUser.uid,
-      createdAt: serverTimestamp(),
+  const handleSendPress = () => {
+    executeWithDelay(() => {
+      handleSend();
     });
-
-    setMessage('');
-    flatListRef.current?.scrollToEnd({ animated: true });
-  } catch (error) {
-    console.error('Error sending message:', error);
-    Alert.alert('Error', 'Failed to send message');
-  }
-};
-const handleSendPress = () => {
-  executeWithDelay(() => {
-    handleSend();
-  });
-};
+  };
 
   const renderChatMessage = ({ item }) => {
     const isMe = item.uid === auth.currentUser.uid;
@@ -172,15 +160,14 @@ const handleSendPress = () => {
           ]}>
             {item.text}
           </Text>
-          <Text style={styles.timestamp}>
-            {item.createdAt?.toDate?.().toLocaleTimeString() || ''}
+          <Text style={[styles.timestamp, isMe ? styles.myTimestamp : styles.otherTimestamp]}>
+            {item.createdAt?.toDate?.().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || ''}
           </Text>
         </View>
       </View>
     );
   };
 
-  // Check if current user is a participant (keeping your existing logic)
   const checkParticipationStatus = (participantsList, requestsList) => {
     const currentUserId = auth.currentUser?.uid;
     if (!currentUserId) {
@@ -188,31 +175,20 @@ const handleSendPress = () => {
       setHasRequestedJoin(false);
       return;
     }
-
     const isUserParticipant = participantsList.some(p => p.uid === currentUserId);
     setIsParticipant(isUserParticipant);
-
     const hasUserRequested = requestsList.some(r => r.uid === currentUserId);
     setHasRequestedJoin(hasUserRequested);
   };
 
-  // Memoize expensive calculations
- const isCreator = useMemo(() => {
-  if (!auth.currentUser?.uid || !room?.createdBy) return false;
-  return auth.currentUser.uid === room.createdBy;
-}, [auth.currentUser?.uid, room?.createdBy]);
+  const isCreator = useMemo(() => {
+    if (!auth.currentUser?.uid || !room?.createdBy) return false;
+    return auth.currentUser.uid === room.createdBy;
+  }, [auth.currentUser?.uid, room?.createdBy]);
 
-  const formattedDate = useMemo(() => 
-    formatDateString(room?.date), 
-    [room?.date]
-  );
+  const formattedDate = useMemo(() => formatDateString(room?.date), [room?.date]);
+  const formattedTime = useMemo(() => formatTimeString(room?.time), [room?.time]);
 
-  const formattedTime = useMemo(() => 
-    formatTimeString(room?.time), 
-    [room?.time]
-  );
-
-  // Memoize participant click handler
   const handleUserProfileClick = useCallback((uid) => {
     if (uid === auth.currentUser?.uid) return;
     setSelectedUserProfile(uid);
@@ -224,418 +200,199 @@ const handleSendPress = () => {
     setSelectedUserProfile(null);
   }, []);
 
-// FIXED VERSION - Replace lines 215-280 in your [id] (6).js file
-
-useEffect(() => {
-  if (!id) return;
-  console.log('🚀 === ROOM DATA LOADER STARTED ===');
-  console.log('📍 Room ID:', id);
-  console.log('👤 Current User:', auth.currentUser?.uid);
-  
-  setIsLoading(true);
-
-  const roomRef = doc(db, 'rooms', id);
-
-  const unsubscribeRoom = onSnapshot(
-    roomRef, 
-    async (docSnap) => {
-      console.log('🔥 Room snapshot received');
-      
+  useEffect(() => {
+    if (!id) return;
+    setIsLoading(true);
+    const roomRef = doc(db, 'rooms', id);
+    const unsubscribeRoom = onSnapshot(roomRef, async (docSnap) => {
       if (!docSnap.exists()) {
-        console.log('❌ Room does not exist!');
         Alert.alert('Room Not Found', 'This room no longer exists.', [
           { text: 'OK', onPress: () => router.replace('/my-rooms') }
         ]);
         return;
       }
-
       const roomData = docSnap.data();
-      console.log('✅ Room exists!');
-      
       setRoom(roomData);
       setIsLoading(false);
       
-      // Process requests with better error handling
       const uids = roomData?.requests || [];
       const timestamps = roomData?.requestTimestamps || {};
 
-      console.log('📋 Processing Requests:', uids.length);
-
       if (uids.length > 0) {
-        console.log('🔄 Fetching user data for', uids.length, 'requests...');
-        
         try {
           const requests = [];
-          
           for (let i = 0; i < uids.length; i++) {
             const uid = uids[i];
-            console.log(`  - [${i + 1}/${uids.length}] Fetching user: ${uid.substring(0, 8)}...`);
-            
             try {
               const userSnap = await getDoc(doc(db, 'users', uid));
-              
-              // Check if user document exists
               if (!userSnap.exists()) {
-                console.log(`    ⚠️ User document doesn't exist for ${uid}, using fallback`);
-                requests.push({
-                  uid,
-                  nickname: `User-${uid.substring(0, 8)}`,
-                  major: 'Unknown',
-                  requestedAt: new Date(),
-                });
+                requests.push({ uid, nickname: `User-${uid.substring(0, 8)}`, major: 'Unknown', requestedAt: new Date() });
                 continue;
               }
-              
               const userData = userSnap.data();
-              
-              // Safely extract user data with fallbacks
               const nickname = userData?.instagram || userData?.nickname || `User-${uid.substring(0, 8)}`;
               const major = userData?.major || 'Not specified';
-
-              // Handle timestamp safely
               let requestedAt = new Date();
               if (timestamps[uid]) {
                 try {
-                  if (timestamps[uid].toDate && typeof timestamps[uid].toDate === 'function') {
-                    requestedAt = timestamps[uid].toDate();
-                  } else if (timestamps[uid].seconds) {
-                    requestedAt = new Date(timestamps[uid].seconds * 1000);
-                  }
-                } catch (timestampError) {
-                  console.log('    ⚠️ Error parsing timestamp, using current time');
-                }
+                  if (timestamps[uid].toDate) requestedAt = timestamps[uid].toDate();
+                  else if (timestamps[uid].seconds) requestedAt = new Date(timestamps[uid].seconds * 1000);
+                } catch (e) {}
               }
-
-              console.log(`    ✓ Got: ${nickname} (${major})`);
-
-              requests.push({
-                uid,
-                nickname,
-                major,
-                requestedAt,
-              });
-            } catch (userError) {
-              console.error(`    ❌ Error fetching user ${uid}:`, userError);
-              // Add user with safe fallback values even on error
-              requests.push({
-                uid,
-                nickname: `User-${uid.substring(0, 8)}`,
-                major: 'Unknown',
-                requestedAt: new Date(),
-              });
+              requests.push({ uid, nickname, major, requestedAt });
+            } catch (e) {
+               requests.push({ uid, nickname: `User-${uid.substring(0, 8)}`, major: 'Unknown', requestedAt: new Date() });
             }
           }
-          
-          // Sort by request time safely
-          requests.sort((a, b) => {
-            try {
-              const timeA = a.requestedAt instanceof Date ? a.requestedAt.getTime() : 0;
-              const timeB = b.requestedAt instanceof Date ? b.requestedAt.getTime() : 0;
-              return timeA - timeB;
-            } catch (sortError) {
-              console.log('    ⚠️ Error sorting requests');
-              return 0;
-            }
-          });
-
-          console.log('✅ Successfully processed', requests.length, 'requests');
-          console.log('📝 Request nicknames:', requests.map(r => r.nickname));
-          
+          requests.sort((a, b) => (a.requestedAt?.getTime() || 0) - (b.requestedAt?.getTime() || 0));
           setJoinRequests(requests);
-          console.log('💾 setJoinRequests() called successfully');
-          
         } catch (error) {
-          console.error('❌ Error processing requests:', error);
-          // Set empty array on error to prevent app crash
           setJoinRequests([]);
-          Alert.alert(
-            'Notice', 
-            'Some user data could not be loaded. You can still manage requests.',
-            [{ text: 'OK' }]
-          );
         }
       } else {
-        console.log('ℹ️ No requests to process');
         setJoinRequests([]);
       }
-    }, 
-    (error) => {
-      console.error('❌ Room snapshot error:', error);
+    }, (error) => {
       setIsLoading(false);
-      Alert.alert(
-        'Error Loading Room',
-        'Could not load room details. Please try again.',
-        [{ text: 'OK', onPress: () => router.back() }]
-      );
-    }
-  );
+      Alert.alert('Error', 'Could not load room details.');
+    });
 
-  // Participants listener with better error handling
-  let unsubscribeParticipants;
-  if (auth.currentUser?.uid) {
-    console.log('👥 Setting up participants listener...');
-    
-    const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
-    unsubscribeParticipants = onSnapshot(
-      participantsCollectionRef,
-      async (snapshot) => {
-        console.log('👥 Participants snapshot received:', snapshot.docs.length, 'participants');
-        
+    let unsubscribeParticipants;
+    if (auth.currentUser?.uid) {
+      const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
+      unsubscribeParticipants = onSnapshot(participantsCollectionRef, async (snapshot) => {
         try {
-          const list = await Promise.all(
-            snapshot.docs.map(async (docSnap) => {
-              const data = docSnap.data();
-              
-              try {
-                const userDoc = await getDoc(doc(db, 'users', data.uid));
-                
-                if (!userDoc.exists()) {
-                  console.log(`⚠️ User document doesn't exist for ${data.uid}`);
-                  return { 
-                    uid: data.uid, 
-                    nickname: `User-${data.uid.substring(0, 8)}`, 
-                    major: 'Unknown' 
-                  };
-                }
-                
-                const userData = userDoc.data();
-                const nickname = userData?.instagram || userData?.nickname || `User-${data.uid.substring(0, 8)}`;
-                const major = userData?.major || 'Not specified';
-
-                return { uid: data.uid, nickname, major };
-              } catch (userError) {
-                console.error(`Error fetching participant ${data.uid}:`, userError);
-                return { 
-                  uid: data.uid, 
-                  nickname: `User-${data.uid.substring(0, 8)}`, 
-                  major: 'Unknown' 
-                };
-              }
-            })
-          );
-          
-          console.log('👥 Participants loaded:', list.map(p => p.nickname));
+          const list = await Promise.all(snapshot.docs.map(async (docSnap) => {
+            const data = docSnap.data();
+            try {
+              const userDoc = await getDoc(doc(db, 'users', data.uid));
+              if (!userDoc.exists()) return { uid: data.uid, nickname: `User-${data.uid.substring(0, 8)}`, major: 'Unknown' };
+              const userData = userDoc.data();
+              const nickname = userData?.instagram || userData?.nickname || `User-${data.uid.substring(0, 8)}`;
+              const major = userData?.major || 'Not specified';
+              return { uid: data.uid, nickname, major };
+            } catch (e) {
+              return { uid: data.uid, nickname: `User-${data.uid.substring(0, 8)}`, major: 'Unknown' };
+            }
+          }));
           setParticipants(list);
-        } catch (error) {
-          console.error('❌ Error processing participants:', error);
-        }
-      },
-      (error) => {
-        console.error('❌ Participants snapshot error:', error);
-        Alert.alert(
-          'Notice',
-          'Could not load some participant data.',
-          [{ text: 'OK' }]
-        );
-      }
-    );
-  } else {
-    console.log('⚠️ No current user, skipping participants listener');
-    setParticipants([]);
-  }
+        } catch (e) {}
+      });
+    } else {
+      setParticipants([]);
+    }
 
-  return () => {
-    console.log('🧹 Cleaning up listeners');
-    unsubscribeRoom();
-    if (unsubscribeParticipants) unsubscribeParticipants();
-  };
-}, [id]);
-
-// Add this separate useEffect to log state changes
-useEffect(() => {
-  console.log('🔔 STATE UPDATED:');
-  console.log('  - joinRequests:', joinRequests.length, 'items');
-  if (joinRequests.length > 0) {
-    console.log('  - joinRequests names:', joinRequests.map(r => r.nickname));
-  }
-  console.log('  - participants:', participants.length, 'items');
-  console.log('  - isCreator:', isCreator);
-  console.log('  - isParticipant:', isParticipant);
-  console.log('  - hasRequestedJoin:', hasRequestedJoin);
-}, [joinRequests, participants, isCreator, isParticipant, hasRequestedJoin]);
+    return () => {
+      unsubscribeRoom();
+      if (unsubscribeParticipants) unsubscribeParticipants();
+    };
+  }, [id]);
 
   useEffect(() => {
     checkParticipationStatus(participants, joinRequests);
   }, [participants, joinRequests]);
 
-  // Your existing handler functions (keeping all of them)
   const handleKickParticipant = async (participant) => {
-    Alert.alert(
-      'Kick Participant',
-      `Are you sure you want to remove ${participant.nickname} from this room?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteDoc(doc(db, 'rooms', id, 'participants', participant.uid));
-              Alert.alert('Success', `${participant.nickname} has been removed from the room.`);
-            } catch (error) {
-              console.error('Error kicking participant:', error);
-              Alert.alert('Error', `Failed to remove participant: ${error.message}`);
-            }
-          },
-        },
-      ]
-    );
+    Alert.alert('Kick Participant', `Remove ${participant.nickname}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: async () => {
+          try {
+            await deleteDoc(doc(db, 'rooms', id, 'participants', participant.uid));
+          } catch (e) { Alert.alert('Error', 'Failed to remove participant'); }
+        }
+      }
+    ]);
   };
 
   const handleRequestJoin = async () => {
-    if (!auth.currentUser) {
-      Alert.alert('Authentication Required', 'You must be logged in to join rooms.');
-      return;
-    }
-
+    if (!auth.currentUser) return Alert.alert('Error', 'Login required');
     try {
       const roomRef = doc(db, 'rooms', id);
       await updateDoc(roomRef, {
         requests: arrayUnion(auth.currentUser.uid),
         [`requestTimestamps.${auth.currentUser.uid}`]: serverTimestamp(),
       });
-      Alert.alert('Request Sent', 'Your join request has been sent to the room creator.');
-    } catch (error) {
-      console.error('Error requesting to join:', error);
-      Alert.alert('Error', 'Failed to send join request.');
-    }
+      Alert.alert('Success', 'Request sent!');
+    } catch (e) { Alert.alert('Error', 'Failed to send request'); }
   };
 
-  // NEW: Cancel request function
   const handleCancelRequest = async () => {
-    if (!auth.currentUser) {
-      Alert.alert('Authentication Required', 'You must be logged in to cancel requests.');
-      return;
-    }
-
-    Alert.alert(
-      'Cancel Request',
-      'Are you sure you want to cancel your join request?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const roomRef = doc(db, 'rooms', id);
-              await updateDoc(roomRef, {
-                requests: arrayRemove(auth.currentUser.uid),
-                [`requestTimestamps.${auth.currentUser.uid}`]: null,
-              });
-              Alert.alert('Request Cancelled', 'Your join request has been cancelled.');
-            } catch (error) {
-              console.error('Error cancelling request:', error);
-              Alert.alert('Error', 'Failed to cancel request.');
-            }
-          },
-        },
-      ]
-    );
+    if (!auth.currentUser) return;
+    Alert.alert('Cancel Request', 'Cancel your join request?', [
+      { text: 'No', style: 'cancel' },
+      { text: 'Yes', style: 'destructive', onPress: async () => {
+          try {
+            const roomRef = doc(db, 'rooms', id);
+            await updateDoc(roomRef, {
+              requests: arrayRemove(auth.currentUser.uid),
+              [`requestTimestamps.${auth.currentUser.uid}`]: null,
+            });
+          } catch (e) { Alert.alert('Error', 'Failed to cancel'); }
+        }
+      }
+    ]);
   };
-const handleReportUser = (participant) => {
-  setReportedUser(participant);
-  setReportModalVisible(true);
-};
 
-const submitReport = async () => {
-  if (!reportReason.trim()) {
-    Alert.alert('Error', 'Please provide a reason for the report');
-    return;
-  }
+  const handleReportUser = (participant) => {
+    setReportedUser(participant);
+    setReportModalVisible(true);
+  };
 
-  try {
-    // Add report to Firestore
-    await addDoc(collection(db, 'reports'), {
-      reportedUserId: reportedUser.uid,
-      reportedUserNickname: reportedUser.nickname,
-      reporterUserId: auth.currentUser.uid,
-      roomId: id,
-      roomName: room.name,
-      reason: reportReason,
-      createdAt: serverTimestamp(),
-      status: 'pending'
-    });
+  const submitReport = async () => {
+    if (!reportReason.trim()) return Alert.alert('Error', 'Please provide a reason');
+    try {
+      await addDoc(collection(db, 'reports'), {
+        reportedUserId: reportedUser.uid,
+        reportedUserNickname: reportedUser.nickname,
+        reporterUserId: auth.currentUser.uid,
+        roomId: id,
+        roomName: room.name,
+        reason: reportReason,
+        createdAt: serverTimestamp(),
+        status: 'pending'
+      });
+      Alert.alert('Report Submitted', 'Thank you.');
+      setReportModalVisible(false);
+      setReportedUser(null);
+      setReportReason('');
+    } catch (e) { Alert.alert('Error', 'Failed to submit report'); }
+  };
 
-    Alert.alert('Report Submitted', 'Thank you for your report. We will review it shortly.');
-    setReportModalVisible(false);
-    setReportedUser(null);
-    setReportReason('');
-  } catch (error) {
-    console.error('Error submitting report:', error);
-    Alert.alert('Error', 'Failed to submit report. Please try again.');
-  }
-};
   const handleDeleteRoom = async () => {
-    Alert.alert(
-      'Confirm Deletion',
-      'Are you sure you want to delete this room? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteDoc(doc(db, 'rooms', id));
-              router.replace('/my-rooms');
-            } catch (error) {
-              console.error('Error deleting room:', error);
-              Alert.alert('Error', `Failed to delete room: ${error.message}`);
-            }
-          },
-        },
-      ]
-    );
+    Alert.alert('Delete Room', 'Are you sure? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await deleteDoc(doc(db, 'rooms', id));
+            router.replace('/my-rooms');
+          } catch (e) { Alert.alert('Error', 'Failed to delete room'); }
+        }
+      }
+    ]);
   };
 
   const handleApprove = async (requestUser) => {
-  // Prevent users from approving their own requests
-  if (requestUser.uid === auth.currentUser?.uid) {
-    Alert.alert('Error', 'You cannot approve your own join request.');
-    return;
-  }
-
-  const roomRef = doc(db, 'rooms', id);
+    if (requestUser.uid === auth.currentUser?.uid) return;
+    const roomRef = doc(db, 'rooms', id);
     const participantDocRef = doc(db, 'rooms', id, 'participants', requestUser.uid);
-
     try {
-      await setDoc(participantDocRef, {
-        uid: requestUser.uid,
-        nickname: requestUser.nickname,
-        joinedAt: serverTimestamp(),
-      });
-
-      if (room && room.requests) {
-        await updateDoc(roomRef, {
-          requests: arrayRemove(requestUser.uid),
-        });
-      }
-    } catch (error) {
-      console.error('Error approving request:', error);
-      Alert.alert('Error', `Failed to approve request: ${error.message}`);
-    }
+      await setDoc(participantDocRef, { uid: requestUser.uid, nickname: requestUser.nickname, joinedAt: serverTimestamp() });
+      if (room && room.requests) await updateDoc(roomRef, { requests: arrayRemove(requestUser.uid) });
+    } catch (e) { Alert.alert('Error', 'Failed to approve'); }
   };
 
   const handleDecline = async (requestUser) => {
     const roomRef = doc(db, 'rooms', id);
     try {
-      if (room && room.requests) {
-        await updateDoc(roomRef, {
-          requests: arrayRemove(requestUser.uid),
-        });
-      }
-    } catch (error) {
-      console.error('Error declining request:', error);
-      Alert.alert('Error', `Failed to decline request: ${error.message}`);
-    }
+      if (room && room.requests) await updateDoc(roomRef, { requests: arrayRemove(requestUser.uid) });
+    } catch (e) { Alert.alert('Error', 'Failed to decline'); }
   };
 
   if (!room) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <View style={styles.loadingCard}>
-          <View style={styles.loadingSpinner} />
+          <ActivityIndicator size="large" color="#E8A4C7" />
           <Text style={styles.loadingText}>Loading room details...</Text>
         </View>
       </SafeAreaView>
@@ -646,588 +403,355 @@ const submitReport = async () => {
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={0}
     >
-        <SafeAreaView style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.headerContent}>
-              <View style={styles.headerLeft}>
+      <SafeAreaView style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <View style={styles.headerLeft}>
+              <Pressable style={styles.backButton} onPress={() => router.back()}>
+                <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+              </Pressable>
+              <View style={styles.titleContainer}>
+                <Text style={styles.title} numberOfLines={1}>{room?.name || 'Untitled Room'}</Text>
+                <Text style={styles.subtitle}>{participants.length}/{room?.maxParticipants || '?'} participants</Text>
+              </View>
+            </View>
+            <View style={styles.headerRight}>
+              {isParticipant && (
                 <Pressable 
-                  style={styles.backButton} 
-                  onPress={() => router.back()}
+                  style={[styles.chatToggleButton, showChat && styles.chatToggleButtonActive]} 
+                  onPress={() => setShowChat(!showChat)}
                 >
-                  <Text style={styles.backButtonText}>←</Text>
+                  <Ionicons name={showChat ? "list" : "chatbubbles"} size={20} color={showChat ? "#4A3B47" : "#E8A4C7"} />
                 </Pressable>
-                <View style={styles.titleContainer}>
-                  <Text style={styles.title} numberOfLines={1}>
-                    {room?.name || 'Untitled Room'}
-                  </Text>
-                  <Text style={styles.subtitle}>
-                    {participants.length}/{room?.maxParticipants || '?'} participants
-                  </Text>
+              )}
+              {isCreator && (
+                <Pressable style={styles.deleteButton} onPress={handleDeleteRoom}>
+                   <Ionicons name="trash-outline" size={20} color="#E8A4C7" />
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
+
+        {/* Chat Modal */}
+        <Modal visible={showChat} animationType="slide" presentationStyle="pageSheet">
+          <View style={styles.chatContainer}>
+             {/* Chat Header */}
+            <View style={styles.chatHeader}>
+              <View style={styles.chatHeaderContent}>
+                <Text style={styles.chatTitle}>💬 Room Chat</Text>
+                <Pressable style={styles.closeChatButton} onPress={() => setShowChat(false)}>
+                   <Ionicons name="close" size={24} color="#E8A4C7" />
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Messages */}
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderChatMessage}
+              contentContainerStyle={styles.flatListContent}
+              style={styles.messagesFlatList}
+              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+              showsVerticalScrollIndicator={false}
+            />
+
+            {/* Input */}
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}>
+              <View style={styles.inputContainer}>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={[styles.input, isDisabled && styles.inputDisabled]}
+                    placeholder="Type your message..."
+                    placeholderTextColor="#999"
+                    value={message}
+                    onChangeText={setMessage}
+                    multiline={false}
+                    maxLength={500}
+                    editable={!isDisabled}
+                  />
+                  <Pressable 
+                    style={[styles.sendButton, (message.trim() === '' || isDisabled) && styles.sendButtonDisabled]} 
+                    onPress={handleSendPress}
+                    disabled={message.trim() === '' || isDisabled}
+                  >
+                     <Ionicons name="send" size={20} color={isDisabled ? "#999" : "#1C6F75"} />
+                  </Pressable>
                 </View>
               </View>
-              <View style={styles.headerRight}>
-                {isParticipant && (
-                  <Pressable 
-                    style={[styles.chatToggleButton, showChat && styles.chatToggleButtonActive]} 
-                    onPress={() => setShowChat(!showChat)}
-                  >
-                    <Text style={styles.chatToggleButtonText}>
-                      {showChat ? '📋' : '💬'}
-                    </Text>
-                  </Pressable>
-                )}
-                {isCreator && (
-                  <Pressable style={styles.deleteButton} onPress={handleDeleteRoom}>
-                    <Text style={styles.deleteButtonText}>🗑️</Text>
-                  </Pressable>
-                )}
+            </KeyboardAvoidingView>
+          </View>
+        </Modal>
+
+        {/* Content ScrollView */}
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+        >
+          {/* Room Info Card */}
+          <View style={styles.infoCard}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>🍺 Room Details</Text>
+              {isCreator && (
+                <View style={styles.creatorBadge}>
+                  <Text style={styles.creatorBadgeText}>👑 Host</Text>
+                </View>
+              )}
+            </View>
+            
+            <View style={styles.infoGrid}>
+              <View style={styles.infoItem}>
+                 <Ionicons name="location-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Location</Text>
+                  <Text style={styles.infoValue}>{getDisplayLocation()}</Text>
+                </View>
               </View>
+
+              <View style={styles.infoItem}>
+                 <Ionicons name="calendar-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Date</Text>
+                  <Text style={styles.infoValue}>{formattedDate}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.infoItem}>
+                <Ionicons name="time-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Time</Text>
+                  <Text style={styles.infoValue}>{formattedTime}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.infoItem}>
+                <Ionicons name="people-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoLabel}>Capacity</Text>
+                  <Text style={styles.infoValue}>{participants.length}/{room?.maxParticipants || 0}</Text>
+                </View>
+              </View>
+
+              {room?.description && (
+                <View style={styles.infoItem}>
+                   <Ionicons name="document-text-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoLabel}>Description</Text>
+                    <Text style={styles.infoValue}>{room.description}</Text>
+                  </View>
+                </View>
+              )}
             </View>
           </View>
 
-         {/* Chat Modal */}
-<Modal
-  visible={showChat}
-  animationType="slide"
-  presentationStyle="pageSheet"
->
-  <View style={styles.chatContainer}>
-    <SafeAreaView style={styles.chatSafeArea}>
-      {/* Chat Header */}
-      <View style={styles.chatHeader}>
-        <View style={styles.chatHeaderContent}>
-          <Text style={styles.chatTitle}>💬 Room Chat</Text>
-          <Pressable 
-            style={styles.closeChatButton} 
-            onPress={() => setShowChat(false)}
-          >
-            <Text style={styles.closeChatButtonText}>✕</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      {/* Messages */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderChatMessage}
-        contentContainerStyle={styles.flatListContent}
-        style={styles.messagesFlatList}
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-        showsVerticalScrollIndicator={false}
-      />
-     {/* User Profile Modal */}
-<Modal
-  visible={showUserProfile}
-  animationType="slide"
-  presentationStyle="pageSheet"
->
-  {selectedUserProfile && (
-    <UserProfile 
-      uid={selectedUserProfile} 
-      onClose={closeUserProfile}
-    />
-  )}
-</Modal>
-    </SafeAreaView>
-
-    {/* Input - Outside SafeAreaView for keyboard handling */}
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 50 : 20}
-    >
-      <View style={styles.inputContainer}>
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={[
-              styles.input,
-              isDisabled && styles.inputDisabled
-            ]}
-            placeholder="Type your message..."
-            placeholderTextColor="#999"
-            value={message}
-            onChangeText={setMessage}
-            multiline={false}
-            maxLength={500}
-            editable={!isDisabled}
-          />
-          <Pressable 
-            style={[
-              styles.sendButton,
-              (message.trim() === '' || isDisabled) && styles.sendButtonDisabled
-            ]} 
-            onPress={handleSendPress}
-            disabled={message.trim() === '' || isDisabled}
-          >
-            <Text style={[
-              styles.sendButtonText,
-              isDisabled && styles.sendButtonTextDisabled
-            ]}>
-              {isDisabled ? '⏳' : '➤'}
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-    </KeyboardAvoidingView>
-  </View>
-</Modal>
-
-          {/* Scrollable Content - Your existing room details */}
-         <ScrollView 
-  style={styles.scrollView}
-  contentContainerStyle={styles.scrollContent}
-  showsVerticalScrollIndicator={true}
-  removeClippedSubviews={true}
-  scrollEventThrottle={16}
-  keyboardShouldPersistTaps="handled"
-  maxToRenderPerBatch={10}
-  updateCellsBatchingPeriod={50}
-  initialNumToRender={5}
-  windowSize={10}
-  bounces={true}
->
-            {/* Room Info Card */}
-            <View style={styles.infoCard}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>🍺 Room Details</Text>
-                {isCreator && (
-                  <View style={styles.creatorBadge}>
-                    <Text style={styles.creatorBadgeText}>👑 Host</Text>
-                  </View>
-                )}
-              </View>
-              
-              <View style={styles.infoGrid}>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoIcon}>📍</Text>
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Location</Text>
-                    <Text style={styles.infoValue}>{getDisplayLocation()}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoIcon}>📅</Text>
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Date</Text>
-                    <Text style={styles.infoValue}>{formattedDate}</Text>
-                  </View>
-                </View>
-                
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoIcon}>⏰</Text>
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Time</Text>
-                    <Text style={styles.infoValue}>{formattedTime}</Text>
-                  </View>
-                </View>
-                
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoIcon}>👥</Text>
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Capacity</Text>
-                    <Text style={styles.infoValue}>
-                      {participants.length}/{room?.maxParticipants || 0} people
-                    </Text>
-                  </View>
-                </View>
-
-                {room?.description && (
-                  <View style={styles.infoItem}>
-                    <Text style={styles.infoIcon}>📝</Text>
-                    <View style={styles.infoContent}>
-                      <Text style={styles.infoLabel}>Description</Text>
-                      <Text style={styles.infoValue}>{room.description}</Text>
-                    </View>
-                  </View>
-                )}
+          {/* Participants Section */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>👥 Participants</Text>
+              <View style={styles.participantCount}>
+                <Text style={styles.participantCountText}>{participants.length}</Text>
               </View>
             </View>
+            
+            <View style={styles.participantsList}>
+              {participants.length > 0 ? (
+                participants.map((p, index) => (
+                  <View key={p.uid} style={[styles.participantCard, index === 0 && styles.firstParticipantCard]}>
+                    <View style={styles.participantLeft}>
+                      <View style={styles.participantAvatar}>
+                        <Text style={styles.participantAvatarText}>{(p.nickname || 'A').charAt(0).toUpperCase()}</Text>
+                      </View>
+                      <View style={styles.participantInfo}>
+                        <Pressable onPress={() => handleUserProfileClick(p.uid)}>
+                          <View style={styles.participantNameContainer}>
+                            <Text style={[styles.participantName, styles.clickableUsername]}>
+                              {p.nickname || 'Anonymous'}
+                              {p.uid === room.createdBy && <Text style={styles.hostBadge}> 👑</Text>}
+                              {p.uid === auth.currentUser?.uid && <Text style={styles.youBadge}> (You)</Text>}
+                            </Text>
+                            {isParticipant && p.uid !== auth.currentUser?.uid && (
+                              <Pressable style={styles.reportButton} onPress={() => handleReportUser(p)}>
+                                <Ionicons name="alert-circle-outline" size={16} color="#E1B604" />
+                              </Pressable>
+                            )}
+                          </View>
+                          {p.major && <Text style={styles.participantMajor}>🎓 {p.major}</Text>}
+                        </Pressable>
+                      </View>
+                    </View>
+                    {isCreator && p.uid !== auth.currentUser?.uid && (
+                      <Pressable style={styles.kickButton} onPress={() => handleKickParticipant(p)}>
+                        <Text style={styles.kickButtonText}>Remove</Text>
+                      </Pressable>
+                    )}
+                  </View>
+                ))
+              ) : (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyIcon}>👻</Text>
+                  <Text style={styles.emptyText}>No participants yet</Text>
+                </View>
+              )}
+            </View>
+          </View>
 
-            {/* Participants Section */}
+          {/* Requests Section */}
+          {isCreator && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>👥 Participants</Text>
-                <View style={styles.participantCount}>
-                  <Text style={styles.participantCountText}>{participants.length}</Text>
-                </View>
+                <Text style={styles.sectionTitle}>📋 Join Requests</Text>
+                {joinRequests.length > 0 && (
+                  <View style={styles.requestCount}>
+                    <Text style={styles.requestCountText}>{joinRequests.length}</Text>
+                  </View>
+                )}
               </View>
               
-              <View style={styles.participantsList}>
-                {participants.length > 0 ? (
-                  participants.map((p, index) => (
-                    <View key={p.uid} style={[
-                      styles.participantCard,
-                      index === 0 && styles.firstParticipantCard
-                    ]}>
-                      <View style={styles.participantLeft}>
-                        <View style={styles.participantAvatar}>
-                          <Text style={styles.participantAvatarText}>
-                            {(p.nickname || 'A').charAt(0).toUpperCase()}
-                          </Text>
+              {joinRequests.length > 0 && (
+                <Pressable style={styles.approveAllButton} onPress={async () => { for (const r of joinRequests) await handleApprove(r); }}>
+                  <Text style={styles.approveAllText}>✅ Approve All ({joinRequests.length})</Text>
+                </Pressable>
+              )}
+
+              <View style={styles.requestsList}>
+                {joinRequests.length > 0 ? (
+                  joinRequests.map((r) => (
+                    <View key={r.uid} style={styles.requestCard}>
+                      <View style={styles.requestLeft}>
+                        <View style={styles.requestAvatar}>
+                          <Text style={styles.requestAvatarText}>{(r.nickname || 'A').charAt(0).toUpperCase()}</Text>
                         </View>
-                        <View style={styles.participantInfo}>
-                          <Pressable onPress={() => handleUserProfileClick(p.uid)}>
-                            <View style={styles.participantNameContainer}>
-  <Pressable onPress={() => handleUserProfileClick(p.uid)}>
-    <Text style={[styles.participantName, styles.clickableUsername]}>
-      {p.nickname || 'Anonymous'}
-      {p.uid === room.createdBy && <Text style={styles.hostBadge}> 👑</Text>}
-      {p.uid === auth.currentUser?.uid && <Text style={styles.youBadge}> (You)</Text>}
-    </Text>
-  </Pressable>
-  
-  {/* Report button - only show to other participants, not to self or when viewing own name */}
-  {isParticipant && p.uid !== auth.currentUser?.uid && (
-    <Pressable 
-      style={styles.reportButton}
-      onPress={() => handleReportUser(p)}
-    >
-      <Text style={styles.reportButtonText}>(!)</Text>
-    </Pressable>
-  )}
-</View>
-                            {p.major && (
-                              <Text style={styles.participantMajor}>🎓 {p.major}</Text>
-                            )}
+                        <View style={styles.requestInfo}>
+                          <Pressable onPress={() => handleUserProfileClick(r.uid)}>
+                            <Text style={[styles.requestName, styles.clickableUsername]}>{r.nickname || 'Anonymous'}</Text>
+                            {r.major && <Text style={styles.requestMajor}>🎓 {r.major}</Text>}
                           </Pressable>
                         </View>
                       </View>
-                      {isCreator && p.uid !== auth.currentUser?.uid && (
-                        <Pressable
-                          style={styles.kickButton}
-                          onPress={() => handleKickParticipant(p)}
-                        >
-                          <Text style={styles.kickButtonText}>Remove</Text>
+                      <View style={styles.requestActions}>
+                        <Pressable style={styles.approveButton} onPress={() => handleApprove(r)}>
+                          <Ionicons name="checkmark" size={20} color="#fff" />
                         </Pressable>
-                      )}
+                        <Pressable style={styles.declineButton} onPress={() => handleDecline(r)}>
+                          <Ionicons name="close" size={20} color="#fff" />
+                        </Pressable>
+                      </View>
                     </View>
                   ))
                 ) : (
                   <View style={styles.emptyState}>
-                    <Text style={styles.emptyIcon}>👻</Text>
-                    <Text style={styles.emptyText}>No participants yet</Text>
+                    <Text style={styles.emptyIcon}>📪</Text>
+                    <Text style={styles.emptyText}>No pending requests</Text>
                   </View>
                 )}
               </View>
             </View>
+          )}
 
-
-
-{/* Join Requests - Only for creators */}
-{isCreator && (
-  <View style={styles.section}>
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>📋 Join Requests</Text>
-      {joinRequests.length > 0 && (
-        <View style={styles.requestCount}>
-          <Text style={styles.requestCountText}>{joinRequests.length}</Text>
-        </View>
-      )}
-    </View>
-    
-    {joinRequests.length > 0 && (
-      <Pressable
-        style={styles.approveAllButton}
-        onPress={async () => {
-          console.log('🚀 Approve all pressed');
-          for (const r of joinRequests) {
-            await handleApprove(r);
-          }
-        }}
-      >
-        <Text style={styles.approveAllText}>✅ Approve All ({joinRequests.length})</Text>
-      </Pressable>
-    )}
-
-    <View style={styles.requestsList}>
-      {joinRequests.length > 0 ? (
-        joinRequests.map((r) => (
-          <View key={r.uid} style={styles.requestCard}>
-            <View style={styles.requestLeft}>
-              <View style={styles.requestAvatar}>
-                <Text style={styles.requestAvatarText}>
-                  {(r.nickname || 'A').charAt(0).toUpperCase()}
-                </Text>
+          {/* Join/Cancel Prompt */}
+          {!isParticipant && !isCreator && (
+            <View style={styles.section}>
+              <View style={styles.joinPrompt}>
+                <Text style={styles.joinPromptIcon}>🍻</Text>
+                <Text style={styles.joinPromptText}>Want to join this room?</Text>
+                {hasRequestedJoin ? (
+                  <View style={styles.pendingContainer}>
+                    <View style={styles.pendingBadge}>
+                      <Text style={styles.pendingText}>⏳ Pending</Text>
+                    </View>
+                    <Pressable style={styles.cancelRequestButton} onPress={handleCancelRequest}>
+                      <Text style={styles.cancelRequestButtonText}>Cancel Request</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Pressable style={styles.joinButton} onPress={handleRequestJoin}>
+                    <Text style={styles.joinButtonText}>🙋‍♂️ Request to Join</Text>
+                  </Pressable>
+                )}
               </View>
-              <View style={styles.requestInfo}>
-                <Pressable onPress={() => handleUserProfileClick(r.uid)}>
-                  <Text style={[styles.requestName, styles.clickableUsername]}>
-                    {r.nickname || 'Anonymous'}
-                  </Text>
-                  {r.major && (
-                    <Text style={styles.requestMajor}>🎓 {r.major}</Text>
-                  )}
+            </View>
+          )}
+        </ScrollView>
+
+        {/* User Profile Modal */}
+        <Modal visible={showUserProfile} animationType="slide" presentationStyle="pageSheet">
+          {selectedUserProfile && <UserProfile uid={selectedUserProfile} onClose={closeUserProfile} />}
+        </Modal>
+
+        {/* Report Modal */}
+        <Modal visible={reportModalVisible} transparent={true} animationType="fade">
+          <View style={styles.reportModalOverlay}>
+            <View style={styles.reportModalContainer}>
+              <View style={styles.reportModalHeader}>
+                <Text style={styles.reportModalTitle}>Report User</Text>
+                <Pressable style={styles.reportModalClose} onPress={() => { setReportModalVisible(false); setReportedUser(null); setReportReason(''); }}>
+                  <Ionicons name="close" size={20} color="#E8D5DA" />
+                </Pressable>
+              </View>
+              <Text style={styles.reportModalSubtitle}>Reporting: {reportedUser?.nickname || 'User'}</Text>
+              <TextInput
+                style={styles.reportReasonInput}
+                placeholder="Describe the issue..."
+                placeholderTextColor="#999"
+                value={reportReason}
+                onChangeText={setReportReason}
+                multiline={true}
+                maxLength={500}
+              />
+              <View style={styles.reportModalButtons}>
+                <Pressable style={styles.reportCancelButton} onPress={() => { setReportModalVisible(false); setReportedUser(null); setReportReason(''); }}>
+                  <Text style={styles.reportCancelButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable style={[styles.reportSubmitButton, !reportReason.trim() && styles.reportSubmitButtonDisabled]} onPress={submitReport} disabled={!reportReason.trim()}>
+                  <Text style={styles.reportSubmitButtonText}>Submit</Text>
                 </Pressable>
               </View>
             </View>
-            <View style={styles.requestActions}>
-              <Pressable
-                style={styles.approveButton}
-                onPress={() => {
-                  console.log('✅ Approve pressed for:', r.nickname);
-                  handleApprove(r);
-                }}
-              >
-                <Text style={styles.approveText}>✓</Text>
-              </Pressable>
-              <Pressable
-                style={styles.declineButton}
-                onPress={() => {
-                  console.log('❌ Decline pressed for:', r.nickname);
-                  handleDecline(r);
-                }}
-              >
-                <Text style={styles.declineText}>✕</Text>
-              </Pressable>
-            </View>
           </View>
-        ))
-      ) : (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>📪</Text>
-          <Text style={styles.emptyText}>No pending requests</Text>
-        </View>
-      )}
-    </View>
-  </View>
-)}
+        </Modal>
 
-
-
-            {/* Join Room Section - For non-participants */}
-            {!isParticipant && !isCreator && (
-              <View style={styles.section}>
-                <View style={styles.joinPrompt}>
-                  <Text style={styles.joinPromptIcon}>🍻</Text>
-                  <Text style={styles.joinPromptText}>
-                    Want to join this room?
-                  </Text>
-                  {hasRequestedJoin ? (
-                    <View style={styles.pendingContainer}>
-                      <View style={styles.pendingBadge}>
-                        <Text style={styles.pendingText}>⏳ Request pending approval</Text>
-                      </View>
-                      <Pressable style={styles.cancelRequestButton} onPress={handleCancelRequest}>
-                        <Text style={styles.cancelRequestButtonText}>Cancel Request</Text>
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <Pressable style={styles.joinButton} onPress={handleRequestJoin}>
-                      <Text style={styles.joinButtonText}>🙋‍♂️ Request to Join</Text>
-                    </Pressable>
-                  )}
-                </View>
-              </View>
-            )}
-            
-          </ScrollView>
-
-          {/* User Profile Modal */}
-          <Modal
-            visible={showUserProfile}
-            animationType="slide"
-            presentationStyle="pageSheet"
-          >
-            {selectedUserProfile && (
-              <UserProfile 
-                uid={selectedUserProfile} 
-                onClose={closeUserProfile}
-              />
-            )}
-          </Modal>
-          {/* Inline Report Modal - appears over the content */}
-{reportModalVisible && (
-  <View style={{
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    zIndex: 1000,
-  }}>
-    <View style={{
-      backgroundColor: '#1a1a1a',
-      borderRadius: 20,
-      padding: 24,
-      width: '100%',
-      maxWidth: 400,
-      borderWidth: 1,
-      borderColor: '#333',
-    }}>
-      {/* Header */}
-      <View style={{
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 16,
-      }}>
-        <Text style={{
-          color: '#fff',
-          fontSize: 20,
-          fontWeight: '600',
-        }}>Report User</Text>
-        <Pressable 
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 16,
-            backgroundColor: '#2a2a2a',
-            justifyContent: 'center',
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: '#333',
-          }}
-          onPress={() => {
-            setReportModalVisible(false);
-            setReportedUser(null);
-            setReportReason('');
-          }}
-        >
-          <Text style={{
-            color: '#fff',
-            fontSize: 16,
-            fontWeight: '500',
-          }}>✕</Text>
-        </Pressable>
-      </View>
-      
-      {/* Subtitle */}
-      <Text style={{
-        color: '#ff0000ff',
-        fontSize: 16,
-        fontWeight: '500',
-        marginBottom: 20,
-        textAlign: 'center',
-      }}>
-        Reporting: {reportedUser?.nickname || 'User'}
-      </Text>
-      
-      {/* Text Input */}
-      <TextInput
-        style={{
-          backgroundColor: '#2a2a2a',
-          borderRadius: 12,
-          padding: 16,
-          color: '#fff',
-          fontSize: 15,
-          minHeight: 120,
-          textAlignVertical: 'top',
-          borderWidth: 1,
-          borderColor: '#333',
-          marginBottom: 24,
-        }}
-        placeholder="Please describe the issue..."
-        placeholderTextColor="#999"
-        value={reportReason}
-        onChangeText={setReportReason}
-        multiline={true}
-        maxLength={500}
-      />
-      
-      {/* Buttons */}
-      <View style={{
-        flexDirection: 'row',
-        gap: 12,
-      }}>
-        <Pressable 
-          style={{
-            flex: 1,
-            backgroundColor: '#2a2a2a',
-            paddingVertical: 14,
-            borderRadius: 12,
-            alignItems: 'center',
-            borderWidth: 1,
-            borderColor: '#333',
-          }}
-          onPress={() => {
-            setReportModalVisible(false);
-            setReportedUser(null);
-            setReportReason('');
-          }}
-        >
-          <Text style={{
-            color: '#fff',
-            fontSize: 16,
-            fontWeight: '500',
-          }}>Cancel</Text>
-        </Pressable>
-        
-        <Pressable 
-          style={{
-            flex: 1,
-            backgroundColor: !reportReason.trim() ? '#333' : '#FF3B30',
-            paddingVertical: 14,
-            borderRadius: 12,
-            alignItems: 'center',
-          }}
-          onPress={submitReport}
-          disabled={!reportReason.trim()}
-        >
-          <Text style={{
-            color: '#fff',
-            fontSize: 16,
-            fontWeight: '600',
-          }}>Submit Report</Text>
-        </Pressable>
-      </View>
-    </View>
-  </View>
-)}
-        </SafeAreaView>
+      </SafeAreaView>
     </KeyboardAvoidingView>
   );
 }
-// Replace your entire StyleSheet.create({ ... }) section with this:
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#4A3B47', // Dark Pink/Purple Background
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#4A3B47',
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingCard: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#5A4B5C',
     padding: 32,
     borderRadius: 20,
     alignItems: 'center',
-    marginHorizontal: 20,
     borderWidth: 1,
-    borderColor: '#333',
-  },
-  loadingSpinner: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 3,
-    borderColor: '#333',
-    borderTopColor: '#E8D5DA',
-    marginBottom: 16,
+    borderColor: '#7A6B7D',
   },
   loadingText: {
-    color: '#fff',
+    color: '#E8A4C7',
     fontSize: 16,
     fontWeight: '500',
+    marginTop: 16,
   },
 
-  // Header Styles
+  // Header
   header: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#4A3B47',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: '#5A4B5C',
     paddingTop: Platform.OS === 'ios' ? 0 : 10,
   },
   headerContent: {
@@ -1243,29 +767,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
+    padding: 8,
     marginRight: 12,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  backButtonText: {
-    color: '#E8D5DA',
-    fontSize: 20,
-    fontWeight: '600',
   },
   titleContainer: {
     flex: 1,
     marginRight: 12,
   },
   title: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
+    color: '#E8A4C7', // Pink title
+    fontSize: 20,
+    fontWeight: 'bold',
     marginBottom: 2,
   },
   subtitle: {
@@ -1281,77 +793,317 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
   },
   chatToggleButtonActive: {
-    backgroundColor: '#E8D5DA',
-    borderColor: '#E8D5DA',
-  },
-  chatToggleButtonText: {
-    fontSize: 18,
+    backgroundColor: '#E8A4C7',
   },
   deleteButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  deleteButtonText: {
-    fontSize: 16,
   },
 
-  // Chat Styles
+  // Scroll Content
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 100,
+  },
+
+  // Info Card
+  infoCard: {
+    backgroundColor: '#E8D5DA', // Light Beige/Pink Card
+    marginHorizontal: 20,
+    marginTop: 20,
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#3A6A6F', // Teal Border
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  cardTitle: {
+    color: '#4d4c41', // Dark Text
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  creatorBadge: {
+    backgroundColor: '#E1B604', // Mustard
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  creatorBadgeText: {
+    color: '#1C6F75', // Teal text on mustard
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  infoGrid: {
+    gap: 16,
+  },
+  infoItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  infoContent: {
+    flex: 1,
+  },
+  infoLabel: {
+    color: '#1C6F75',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  infoValue: {
+    color: '#4d4c41',
+    fontSize: 16,
+    fontWeight: '400',
+    lineHeight: 22,
+  },
+
+  // Section
+  section: {
+    marginHorizontal: 20,
+    marginTop: 24,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    color: '#E8A4C7',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  participantCount: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  participantCountText: {
+    color: '#E8D5DA',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  requestCount: {
+    backgroundColor: '#E1B604',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  requestCountText: {
+    color: '#1C6F75',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+
+  // Participants
+  participantsList: {
+    gap: 12,
+  },
+  participantCard: {
+    backgroundColor: '#E8D5DA',
+    padding: 16,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#3A6A6F',
+  },
+  firstParticipantCard: {
+    borderWidth: 2,
+    borderColor: '#E1B604', // Gold border for first/creator
+  },
+  participantLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  participantAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1C6F75', // Teal Avatar
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  participantAvatarText: {
+    color: '#E8D5DA',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  participantInfo: {
+    flex: 1,
+  },
+  participantNameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  participantName: {
+    color: '#4d4c41',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  clickableUsername: {
+    textDecorationLine: 'underline',
+  },
+  hostBadge: {
+    color: '#E1B604',
+    fontWeight: 'bold',
+  },
+  youBadge: {
+    color: '#1C6F75',
+    fontWeight: 'bold',
+  },
+  participantMajor: {
+    color: '#666',
+    fontSize: 14,
+  },
+  reportButton: {
+    marginLeft: 8,
+    padding: 4,
+  },
+  kickButton: {
+    backgroundColor: '#C62828',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  kickButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+
+  // Requests
+  approveAllButton: {
+    backgroundColor: '#1C6F75',
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  approveAllText: {
+    color: '#E8D5DA',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  requestsList: {
+    gap: 12,
+  },
+  requestCard: {
+    backgroundColor: '#E8D5DA',
+    padding: 16,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 2,
+    borderColor: '#E1B604', // Mustard Border for requests
+  },
+  requestLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  requestAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E1B604',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  requestAvatarText: {
+    color: '#1C6F75',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  requestInfo: {
+    flex: 1,
+  },
+  requestName: {
+    color: '#4d4c41',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  requestMajor: {
+    color: '#666',
+    fontSize: 14,
+  },
+  requestActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  approveButton: {
+    backgroundColor: '#1C6F75',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  declineButton: {
+    backgroundColor: '#C62828',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // Chat
   chatContainer: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
-  chatSafeArea: {
-    flex: 1,
+    backgroundColor: '#4A3B47',
   },
   chatHeader: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#5A4B5C',
+    paddingTop: Platform.OS === 'ios' ? 20 : 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
-    paddingTop: Platform.OS === 'ios' ? 0 : 10,
+    borderBottomColor: '#7A6B7D',
   },
   chatHeaderContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    padding: 16,
   },
   chatTitle: {
-    color: '#fff',
+    color: '#E8A4C7',
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   closeChatButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  closeChatButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
+    padding: 8,
   },
   messagesFlatList: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#4A3B47',
   },
   flatListContent: {
     paddingVertical: 20,
@@ -1373,19 +1125,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   myMessageBubble: {
-    backgroundColor: '#E8D5DA',
-    borderBottomRightRadius: 8,
+    backgroundColor: '#E8D5DA', // Light bubble for me
+    borderBottomRightRadius: 4,
   },
   otherMessageBubble: {
-    backgroundColor: '#2a2a2a',
-    borderBottomLeftRadius: 8,
-    borderWidth: 1,
-    borderColor: '#444',
+    backgroundColor: '#5A4B5C', // Darker bubble for others
+    borderBottomLeftRadius: 4,
   },
   senderName: {
-    color: '#999',
+    color: '#E8A4C7',
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: 'bold',
     marginBottom: 4,
   },
   messageText: {
@@ -1393,41 +1143,46 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   myMessageText: {
-    color: '#fff',
+    color: '#4d4c41', // Dark text on light bubble
   },
   otherMessageText: {
-    color: '#fff',
+    color: '#E8D5DA', // Light text on dark bubble
   },
   timestamp: {
-    fontSize: 11,
-    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 10,
     marginTop: 4,
     alignSelf: 'flex-end',
   },
+  myTimestamp: {
+    color: '#666',
+  },
+  otherTimestamp: {
+    color: '#aaa',
+  },
   inputContainer: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#5A4B5C',
+    paddingBottom: Platform.OS === 'ios' ? 30 : 16,
     borderTopWidth: 1,
-    borderTopColor: '#333',
-    paddingBottom: Platform.OS === 'ios' ? 20 : 16,
+    borderTopColor: '#7A6B7D',
   },
   inputWrapper: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 16,
     gap: 12,
   },
   input: {
     flex: 1,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#4A3B47',
     borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    color: '#fff',
+    color: '#E8D5DA',
     fontSize: 15,
     maxHeight: 100,
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: '#7A6B7D',
   },
   inputDisabled: {
     opacity: 0.6,
@@ -1436,415 +1191,106 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#E8D5DA',
+    backgroundColor: '#E1B604',
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendButtonDisabled: {
-    backgroundColor: '#333',
-  },
-  sendButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  sendButtonTextDisabled: {
-    color: '#666',
+    backgroundColor: '#7A6B7D',
   },
 
-  // Content Styles
-  scrollView: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: 100,
-  },
-
-  // Card Styles - UPDATED FOR PINK THEME
-  infoCard: {
-    backgroundColor: '#E8D5DA',
-    marginHorizontal: 20,
-    marginTop: 20,
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 0,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  cardTitle: {
-    color: '#2a2a2a',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  creatorBadge: {
-    backgroundColor: '#9c7a8f',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  creatorBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  infoGrid: {
-    gap: 16,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  infoIcon: {
-    fontSize: 18,
-    marginRight: 12,
-    marginTop: 2,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoLabel: {
-    color: '#7a6070',
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  infoValue: {
-    color: '#2a2a2a',
-    fontSize: 15,
-    fontWeight: '400',
-    lineHeight: 20,
-  },
-
-  // Section Styles
-  section: {
-    marginHorizontal: 20,
-    marginTop: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  participantCount: {
-    backgroundColor: '#2a2a2a',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  participantCountText: {
-    color: '#E8D5DA',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  requestCount: {
-    backgroundColor: '#E8D5DA',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  requestCountText: {
-    color: '#2a2a2a',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  // Participant Styles - UPDATED FOR PINK THEME
-  participantsList: {
-    gap: 12,
-  },
-  participantCard: {
-    backgroundColor: '#E8D5DA',
-    padding: 16,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 0,
-  },
-  firstParticipantCard: {
-    borderColor: '#9c7a8f',
-    borderWidth: 2,
-  },
-  participantLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  participantAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#9c7a8f',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  participantAvatarText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  participantInfo: {
-    flex: 1,
-  },
-  participantName: {
-    color: '#2a2a2a',
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  clickableUsername: {
-    textDecorationLine: 'underline',
-    textDecorationColor: '#9c7a8f',
-  },
-  participantMajor: {
-    color: '#7a6070',
-    fontSize: 14,
-    fontWeight: '400',
-  },
-  participantNameContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  reportButton: {
-    marginLeft: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#FF3B30',
-    minWidth: 32,
-    minHeight: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  reportButtonText: {
-    color: '#FF3B30',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  hostBadge: {
-    color: '#9c7a8f',
-  },
-  youBadge: {
-    color: '#9c7a8f',
-  },
-  kickButton: {
-    backgroundColor: '#dc2626',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  kickButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-
-  // Request Styles - UPDATED FOR PINK THEME
-  approveAllButton: {
-    backgroundColor: '#9c7a8f',
-    padding: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  approveAllText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  requestsList: {
-    gap: 12,
-  },
-  requestCard: {
-    backgroundColor: '#E8D5DA',
-    padding: 16,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 2,
-    borderColor: '#9c7a8f',
-  },
-  requestLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  requestAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#9c7a8f',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    borderWidth: 0,
-  },
-  requestAvatarText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  requestInfo: {
-    flex: 1,
-  },
-  requestName: {
-    color: '#2a2a2a',
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  requestMajor: {
-    color: '#7a6070',
-    fontSize: 14,
-    fontWeight: '400',
-  },
-  requestActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  approveButton: {
-    backgroundColor: '#16a34a',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  approveText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  declineButton: {
-    backgroundColor: '#dc2626',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  declineText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  // Join Section Styles - UPDATED FOR PINK THEME
+  // Join Prompt
   joinPrompt: {
     backgroundColor: '#E8D5DA',
     padding: 24,
     borderRadius: 20,
     alignItems: 'center',
-    borderWidth: 0,
+    borderWidth: 1,
+    borderColor: '#3A6A6F',
   },
   joinPromptIcon: {
     fontSize: 32,
     marginBottom: 12,
   },
   joinPromptText: {
-    color: '#2a2a2a',
+    color: '#4d4c41',
     fontSize: 18,
-    fontWeight: '500',
+    fontWeight: '600',
     marginBottom: 20,
     textAlign: 'center',
   },
   joinButton: {
-    backgroundColor: '#9c7a8f',
+    backgroundColor: '#1C6F75',
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 16,
+    borderRadius: 20,
     minWidth: 180,
     alignItems: 'center',
   },
   joinButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   pendingContainer: {
     alignItems: 'center',
     gap: 12,
   },
   pendingBadge: {
-    backgroundColor: '#fbbf24',
+    backgroundColor: '#E1B604',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 16,
   },
   pendingText: {
-    color: '#000',
+    color: '#1C6F75',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   cancelRequestButton: {
-    backgroundColor: '#fff',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#9c7a8f',
   },
   cancelRequestButtonText: {
-    color: '#2a2a2a',
+    color: '#C62828',
     fontSize: 14,
     fontWeight: '500',
+    textDecorationLine: 'underline',
   },
 
-  // Empty State Styles - UPDATED FOR PINK THEME
+  // Empty State
   emptyState: {
     alignItems: 'center',
     padding: 32,
-    backgroundColor: '#E8D5DA',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 16,
-    borderWidth: 0,
   },
   emptyIcon: {
     fontSize: 32,
     marginBottom: 8,
   },
   emptyText: {
-    color: '#7a6070',
+    color: '#E8D5DA',
     fontSize: 16,
-    fontWeight: '400',
+    opacity: 0.7,
   },
-  
-  // Report Modal Styles
+
+  // Report Modal
   reportModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    zIndex: 10000,
-    elevation: 10000,
   },
   reportModalContainer: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#5A4B5C',
     borderRadius: 20,
     padding: 24,
     width: '100%',
     maxWidth: 400,
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: '#7A6B7D',
   },
   reportModalHeader: {
     flexDirection: 'row',
@@ -1853,42 +1299,29 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   reportModalTitle: {
-    color: '#fff',
+    color: '#E8A4C7',
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   reportModalClose: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  reportModalCloseText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
+    padding: 4,
   },
   reportModalSubtitle: {
     color: '#E8D5DA',
     fontSize: 16,
-    fontWeight: '500',
     marginBottom: 20,
     textAlign: 'center',
   },
   reportReasonInput: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#4A3B47',
     borderRadius: 12,
     padding: 16,
-    color: '#fff',
+    color: '#E8D5DA',
     fontSize: 15,
     minHeight: 120,
     textAlignVertical: 'top',
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: '#7A6B7D',
     marginBottom: 24,
   },
   reportModalButtons: {
@@ -1897,31 +1330,29 @@ const styles = StyleSheet.create({
   },
   reportCancelButton: {
     flex: 1,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#7A6B7D',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
   },
   reportCancelButtonText: {
-    color: '#fff',
+    color: '#E8D5DA',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
   reportSubmitButton: {
     flex: 1,
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#C62828',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
   },
   reportSubmitButtonDisabled: {
-    backgroundColor: '#333',
+    opacity: 0.5,
   },
   reportSubmitButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
 });

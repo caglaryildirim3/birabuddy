@@ -10,7 +10,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Linking,
-  Platform,
   Modal
 } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
@@ -25,10 +24,14 @@ export default function MyProfile() {
   const [major, setMajor] = useState('');
   const [age, setAge] = useState('');
   const [favDrink, setFavDrink] = useState('');
+  const [university, setUniversity] = useState(''); // New state for University
+  
+  // Original states for change detection
   const [originalInstagram, setOriginalInstagram] = useState('');
   const [originalMajor, setOriginalMajor] = useState('');
   const [originalAge, setOriginalAge] = useState('');
   const [originalFavDrink, setOriginalFavDrink] = useState('');
+  
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [userStats, setUserStats] = useState({ roomsCreated: 0, roomsJoined: 0 });
@@ -38,26 +41,42 @@ export default function MyProfile() {
   const [tempInstagram, setTempInstagram] = useState('');
   const [updatingInstagram, setUpdatingInstagram] = useState(false);
 
+  // Helper to extract university from email if not in DB
+  const getUniversityFromEmail = (email) => {
+    if (!email) return '';
+    try {
+      const domainPart = email.split('@')[1];
+      if (domainPart) {
+          let cleanDomain = domainPart.replace('std.', '').replace('mail.', '').replace('ogrenci.', '');
+          let uniName = cleanDomain.replace('.edu.tr', '');
+          return uniName.toUpperCase() + ' UNIV.';
+      }
+    } catch (e) {
+      return '';
+    }
+    return '';
+  };
+
   useEffect(() => {
     const fetchUserData = async () => {
       try {
         setLoading(true);
         
-        // Fetch user data
         const userRef = doc(db, 'users', user.uid);
         const userSnap = await getDoc(userRef);
         const data = userSnap.exists() ? userSnap.data() : {};
         
-        // Debug: Let's see what's actually in the database
-        console.log('User data from Firestore:', data);
-        console.log('User UID:', user.uid);
-        
-        // Get Instagram username - check for instagram field first
         const fetchedInstagram = data.instagram || '';
-        console.log('Fetched Instagram username:', fetchedInstagram);
         const fetchedMajor = data.major || '';
         const fetchedAge = data.age ? data.age.toString() : '';
         const fetchedFavDrink = data.favDrink || '';
+
+        // SMART UNIVERSITY CHECK
+        let fetchedUniversity = data.university;
+        if (!fetchedUniversity) {
+            // If missing in DB, calculate it from the Auth email
+            fetchedUniversity = getUniversityFromEmail(user.email);
+        }
 
         setInstagram(fetchedInstagram);
         setOriginalInstagram(fetchedInstagram);
@@ -67,8 +86,8 @@ export default function MyProfile() {
         setOriginalAge(fetchedAge);
         setFavDrink(fetchedFavDrink);
         setOriginalFavDrink(fetchedFavDrink);
+        setUniversity(fetchedUniversity);
 
-        // Fetch user stats
         const roomsQuery = query(collection(db, 'rooms'), where('createdBy', '==', user.uid));
         const roomsSnap = await getDocs(roomsQuery);
         
@@ -93,30 +112,21 @@ export default function MyProfile() {
   // Validate age
   const validateAge = (ageString) => {
     const ageNum = parseInt(ageString);
-    if (isNaN(ageNum)) {
-      return { valid: false, message: 'Please enter a valid age' };
-    }
-    if (ageNum < 18) {
-      return { valid: false, message: 'You must be at least 18 years old' };
-    }
-    if (ageNum > 100) {
-      return { valid: false, message: 'Please enter a valid age' };
-    }
+    if (isNaN(ageNum)) return { valid: false, message: 'Please enter a valid age' };
+    if (ageNum < 18) return { valid: false, message: 'You must be at least 18 years old' };
+    if (ageNum > 100) return { valid: false, message: 'Please enter a valid age' };
     return { valid: true };
   };
 
-  // Clean Instagram username
   const cleanInstagramHandle = (handle) => {
     return handle.replace(/[@\s]/g, '').toLowerCase();
   };
 
-  // Open Instagram edit modal
   const openInstagramEdit = () => {
     setTempInstagram(instagram);
     setShowInstagramModal(true);
   };
 
-  // Save Instagram username
   const saveInstagram = async () => {
     const cleanedHandle = cleanInstagramHandle(tempInstagram);
     
@@ -132,16 +142,11 @@ export default function MyProfile() {
 
     try {
       setUpdatingInstagram(true);
-      
-      await setDoc(
-        doc(db, 'users', user.uid),
-        { 
+      await setDoc(doc(db, 'users', user.uid), { 
           instagram: cleanedHandle,
           updatedAt: new Date()
-        },
-        { merge: true }
+        }, { merge: true }
       );
-
       setInstagram(cleanedHandle);
       setOriginalInstagram(cleanedHandle);
       setShowInstagramModal(false);
@@ -154,7 +159,6 @@ export default function MyProfile() {
   };
 
   const handleUpdateProfile = async () => {
-    // Validate age
     if (age.trim()) {
       const ageValidation = validateAge(age);
       if (!ageValidation.valid) {
@@ -166,11 +170,7 @@ export default function MyProfile() {
     const trimmedMajor = major.trim();
     const trimmedFavDrink = favDrink.trim();
 
-    if (
-      trimmedMajor === originalMajor &&
-      age === originalAge &&
-      trimmedFavDrink === originalFavDrink
-    ) {
+    if (trimmedMajor === originalMajor && age === originalAge && trimmedFavDrink === originalFavDrink) {
       Alert.alert('No Changes', 'No changes were made');
       return;
     }
@@ -182,16 +182,9 @@ export default function MyProfile() {
         favDrink: trimmedFavDrink,
         updatedAt: new Date()
       };
+      if (age.trim()) updateData.age = parseInt(age);
 
-      if (age.trim()) {
-        updateData.age = parseInt(age);
-      }
-
-      await setDoc(
-        doc(db, 'users', user.uid),
-        updateData,
-        { merge: true }
-      );
+      await setDoc(doc(db, 'users', user.uid), updateData, { merge: true });
 
       setOriginalMajor(trimmedMajor);
       setOriginalAge(age);
@@ -206,10 +199,8 @@ export default function MyProfile() {
 
   const openInstagram = async () => {
     if (!instagram) return;
-    
     const instagramUrl = `https://www.instagram.com/${instagram}/`;
     const instagramAppUrl = `instagram://user?username=${instagram}`;
-    
     try {
       const canOpenApp = await Linking.canOpenURL(instagramAppUrl);
       if (canOpenApp) {
@@ -218,72 +209,41 @@ export default function MyProfile() {
         await Linking.openURL(instagramUrl);
       }
     } catch (error) {
-      console.log('Error opening Instagram:', error);
-      // Try a simpler fallback URL
-      try {
-        await Linking.openURL(`https://www.instagram.com/${instagram}`);
-      } catch (fallbackError) {
-        Alert.alert('Error', 'Could not open Instagram profile');
-      }
+      try { await Linking.openURL(`https://www.instagram.com/${instagram}`); } catch (e) {}
     }
   };
 
   const handleSignOut = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to sign out?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'default',
-          onPress: async () => {
-            try {
-              await signOut(auth);
-              router.replace('/login');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to sign out');
-            }
-          },
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign Out', style: 'default', onPress: async () => {
+          try {
+            await signOut(auth);
+            router.replace('/login');
+          } catch (error) { Alert.alert('Error', 'Failed to sign out'); }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This will permanently delete your account and all your data. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Forever',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Final Warning',
-              'Are you absolutely sure? This will delete everything permanently.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Yes, Delete Everything',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await deleteDoc(doc(db, 'users', user.uid));
-                      await user.delete();
-                      Alert.alert('Account Deleted', 'Your account has been permanently removed');
-                    } catch (err) {
-                      Alert.alert('Error', `Failed to delete account: ${err.message}`);
-                    }
-                  },
-                },
-              ]
-            );
-          },
+    Alert.alert('Delete Account', 'This will permanently delete your account. Cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete Forever', style: 'destructive', onPress: () => {
+          Alert.alert('Final Warning', 'Are you absolutely sure?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Yes, Delete Everything', style: 'destructive', onPress: async () => {
+                try {
+                  await deleteDoc(doc(db, 'users', user.uid));
+                  await user.delete();
+                  Alert.alert('Account Deleted', 'Your account has been removed');
+                } catch (err) { Alert.alert('Error', `Failed to delete: ${err.message}`); }
+              },
+            },
+          ]);
         },
-      ]
-    );
+      },
+    ]);
   };
 
   if (loading) {
@@ -302,7 +262,6 @@ export default function MyProfile() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.header}>🍺 my profile</Text>
         
-        {/* Profile Info Section */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatarPlaceholder}>
@@ -319,35 +278,32 @@ export default function MyProfile() {
           
           <View style={styles.userInfo}>
             <Text style={styles.name}>{instagram || 'No Instagram username set'}</Text>
+            {/* UNIVERSITY DISPLAY ADDED HERE */}
+            {university ? (
+               <Text style={styles.university}>🏛️ {university}</Text>
+            ) : null}
+            
             <Text style={styles.subtitle}>other users can not see your e-mail</Text>
             <Text style={styles.email}>{user.email}</Text>
-            {major && (
-              <Text style={styles.major}>🎓 {major}</Text>
-            )}
-            {favDrink && (
-              <Text style={styles.favDrink}>🍻 {favDrink}</Text>
-            )}
+            {major && <Text style={styles.major}>🎓 {major}</Text>}
+            {favDrink && <Text style={styles.favDrink}>🍻 {favDrink}</Text>}
+            
             {instagram && (
               <View style={styles.instagramContainer}>
                 <Pressable onPress={openInstagram}>
                   <Text style={styles.instagram}>📸 @{instagram}</Text>
                 </Pressable>
-                <Pressable 
-                  style={styles.editInstagramButton}
-                  onPress={openInstagramEdit}
-                >
+                <Pressable style={styles.editInstagramButton} onPress={openInstagramEdit}>
                   <Text style={styles.editInstagramButtonText}>✏️</Text>
                 </Pressable>
               </View>
             )}
             <Text style={styles.joinDate}>
-              joined {user.metadata.creationTime ? 
-                new Date(user.metadata.creationTime).toLocaleDateString() : 'recently'}
+              joined {user.metadata.creationTime ? new Date(user.metadata.creationTime).toLocaleDateString() : 'recently'}
             </Text>
           </View>
         </View>
 
-        {/* Stats Section */}
         <View style={styles.statsSection}>
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>{userStats.roomsCreated}</Text>
@@ -359,7 +315,6 @@ export default function MyProfile() {
           </View>
         </View>
 
-        {/* Edit Profile Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>✏️ edit profile</Text>
           
@@ -409,37 +364,25 @@ export default function MyProfile() {
           </Pressable>
         </View>
 
-        {/* Bottom Actions */}
         <View style={styles.bottomActions}>
           <Pressable style={styles.signOutButton} onPress={handleSignOut}>
             <Text style={styles.signOutButtonText}>sign out</Text>
           </Pressable>
-          
           <Pressable style={styles.deleteButton} onPress={handleDeleteAccount}>
             <Text style={styles.deleteButtonText}>delete account</Text>
           </Pressable>
         </View>
       </ScrollView>
 
-      {/* Instagram Edit Modal */}
-      <Modal
-        visible={showInstagramModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        transparent={true}
-      >
+      <Modal visible={showInstagramModal} animationType="slide" presentationStyle="pageSheet" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>📸 Edit Instagram</Text>
-              <Pressable 
-                style={styles.modalCloseButton}
-                onPress={() => setShowInstagramModal(false)}
-              >
+              <Pressable style={styles.modalCloseButton} onPress={() => setShowInstagramModal(false)}>
                 <Text style={styles.modalCloseText}>✕</Text>
               </Pressable>
             </View>
-
             <Text style={styles.modalLabel}>Instagram Username</Text>
             <TextInput
               style={styles.modalInput}
@@ -451,31 +394,13 @@ export default function MyProfile() {
               autoCorrect={false}
               maxLength={30}
             />
-            <Text style={styles.modalHelpText}>
-              Don't include @ symbol. Just your username.
-            </Text>
-
+            <Text style={styles.modalHelpText}>Don't include @ symbol. Just your username.</Text>
             <View style={styles.modalButtons}>
-              <Pressable 
-                style={styles.modalCancelButton}
-                onPress={() => setShowInstagramModal(false)}
-              >
+              <Pressable style={styles.modalCancelButton} onPress={() => setShowInstagramModal(false)}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </Pressable>
-
-              <Pressable 
-                style={[
-                  styles.modalSaveButton,
-                  updatingInstagram && styles.buttonDisabled
-                ]}
-                onPress={saveInstagram}
-                disabled={updatingInstagram}
-              >
-                {updatingInstagram ? (
-                  <ActivityIndicator size="small" color="#4A3B47" />
-                ) : (
-                  <Text style={styles.modalSaveText}>Save</Text>
-                )}
+              <Pressable style={[styles.modalSaveButton, updatingInstagram && styles.buttonDisabled]} onPress={saveInstagram} disabled={updatingInstagram}>
+                {updatingInstagram ? <ActivityIndicator size="small" color="#4A3B47" /> : <Text style={styles.modalSaveText}>Save</Text>}
               </Pressable>
             </View>
           </View>
@@ -576,6 +501,12 @@ const styles = StyleSheet.create({
     color: '#E8D5DA',
     fontSize: 24,
     fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  university: {
+    color: '#E1B604', // Mustard Yellow to stand out
+    fontSize: 14,
+    fontWeight: 'bold',
     marginBottom: 8,
   },
   email: {
@@ -623,7 +554,6 @@ const styles = StyleSheet.create({
   editInstagramButtonText: {
     fontSize: 14,
   },
-
   joinDate: {
     color: '#E8D5DA',
     fontSize: 12,
@@ -767,8 +697,6 @@ const styles = StyleSheet.create({
     bottom: 5,
     fontStyle: 'italic',
   },
-
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',

@@ -1,4 +1,3 @@
-// Create this as a new file: components/UserProfile.js
 import { useEffect, useState } from 'react';
 import { 
   View, 
@@ -19,20 +18,42 @@ export default function UserProfile({ uid, onClose }) {
   const [loading, setLoading] = useState(true);
   const [userStats, setUserStats] = useState({ roomsCreated: 0 });
 
+  // Helper to extract university from email
+  const getUniversityFromEmail = (email) => {
+    if (!email) return '';
+    try {
+      const domainPart = email.split('@')[1];
+      if (domainPart) {
+          let cleanDomain = domainPart.replace('std.', '').replace('mail.', '').replace('ogrenci.', '');
+          let uniName = cleanDomain.replace('.edu.tr', '');
+          return uniName.toUpperCase() + ' UNIV.';
+      }
+    } catch (e) {
+      return '';
+    }
+    return '';
+  };
+
   useEffect(() => {
     const fetchUserProfile = async () => {
       try {
         setLoading(true);
         
-        // Fetch user data
         const userRef = doc(db, 'users', uid);
         const userSnap = await getDoc(userRef);
         
         if (userSnap.exists()) {
           const userData = userSnap.data();
-          setUserProfile(userData);
           
-          // Fetch user stats (rooms created)
+          // SMART UNIVERSITY CHECK
+          let finalUniversity = userData.university;
+          if (!finalUniversity && userData.email) {
+            finalUniversity = getUniversityFromEmail(userData.email);
+          }
+
+          // Update state with the calculated university
+          setUserProfile({ ...userData, university: finalUniversity });
+          
           const roomsQuery = query(collection(db, 'rooms'), where('createdBy', '==', uid));
           const roomsSnap = await getDocs(roomsQuery);
           
@@ -70,7 +91,6 @@ const openInstagram = async () => {
     }
   } catch (error) {
     console.log('Error opening Instagram:', error);
-    // Try a simpler fallback URL
     try {
       await Linking.openURL(`https://www.instagram.com/${userProfile.instagram}`);
     } catch (fallbackError) {
@@ -120,13 +140,12 @@ const openInstagram = async () => {
       </View>
       
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-        {/* Profile Info Section */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatarPlaceholder}>
               <Text style={styles.avatarText}>
-                {userProfile.name || userProfile.nickname ? 
-                  (userProfile.name || userProfile.nickname).charAt(0).toUpperCase() : '?'}
+                {userProfile.name || userProfile.nickname || userProfile.instagram ? 
+                  (userProfile.name || userProfile.nickname || userProfile.instagram).charAt(0).toUpperCase() : '?'}
               </Text>
             </View>
             {userProfile.age && (
@@ -138,8 +157,14 @@ const openInstagram = async () => {
           
           <View style={styles.userInfo}>
             <Text style={styles.name}>
-              {userProfile.name || userProfile.nickname || 'No name set'}
+              {userProfile.name || userProfile.nickname || userProfile.instagram || 'User'}
             </Text>
+            
+            {/* UNIVERSITY DISPLAY ADDED HERE */}
+            {userProfile.university ? (
+              <Text style={styles.university}>🏛️ {userProfile.university}</Text>
+            ) : null}
+
             {userProfile.major && (
               <Text style={styles.major}>🎓 {userProfile.major}</Text>
             )}
@@ -154,7 +179,6 @@ const openInstagram = async () => {
           </View>
         </View>
 
-        {/* Quick Info Cards */}
         <View style={styles.quickInfoSection}>
           {userProfile.age && (
             <View style={styles.infoCard}>
@@ -173,7 +197,6 @@ const openInstagram = async () => {
           )}
         </View>
 
-        {/* Detailed Info Section */}
         <View style={styles.detailsSection}>
           <Text style={styles.detailsSectionTitle}>📋 profile details</Text>
           
@@ -181,7 +204,15 @@ const openInstagram = async () => {
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>👤 Name:</Text>
               <Text style={styles.detailValue}>
-                {userProfile.name || userProfile.nickname || 'Not set'}
+                {userProfile.name || userProfile.nickname || userProfile.instagram || 'Not set'}
+              </Text>
+            </View>
+
+            {/* ADDED UNIVERSITY TO DETAILS LIST TOO */}
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>🏛️ University:</Text>
+              <Text style={styles.detailValue}>
+                {userProfile.university || 'Not specified'}
               </Text>
             </View>
             
@@ -221,7 +252,6 @@ const openInstagram = async () => {
           </View>
         </View>
 
-        {/* Stats Section */}
         <View style={styles.statsSection}>
           <Text style={styles.statsSectionTitle}>📊 activity stats</Text>
           <View style={styles.statsContainer}>
@@ -236,7 +266,6 @@ const openInstagram = async () => {
           </View>
         </View>
 
-        {/* Beer Compatibility Section */}
         {userProfile.favDrink && (
           <View style={styles.compatibilitySection}>
             <Text style={styles.compatibilitySectionTitle}>🍺 drink compatibility</Text>
@@ -258,7 +287,7 @@ const openInstagram = async () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4A3B47', // Muted dark pink
+    backgroundColor: '#4A3B47', 
   },
   header: {
     flexDirection: 'row',
@@ -272,7 +301,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: '#E8A4C7', // Soft pink
+    color: '#E8A4C7',
     letterSpacing: 1,
   },
   closeButton: {
@@ -384,6 +413,12 @@ const styles = StyleSheet.create({
   name: {
     color: '#E8D5DA',
     fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  university: {
+    color: '#E1B604', // Mustard Yellow for university name
+    fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 8,
   },
