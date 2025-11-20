@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   addDoc,
@@ -16,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -32,7 +34,6 @@ import {
 import UserProfile from '../../components/UserProfile';
 import { auth, db } from '../../firebase/firebaseConfig';
 import { useButtonDelay } from '../../hooks/useButtonDelay';
-import { Ionicons } from '@expo/vector-icons'; // Added Ionicons for better icons
 
 export default function RoomDetails() {
   const { id } = useLocalSearchParams();
@@ -47,7 +48,6 @@ export default function RoomDetails() {
   const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
   const [selectedUserProfile, setSelectedUserProfile] = useState(null);
   const [showUserProfile, setShowUserProfile] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportedUser, setReportedUser] = useState(null);
   const [reportReason, setReportReason] = useState('');
@@ -58,7 +58,7 @@ export default function RoomDetails() {
   const [showChat, setShowChat] = useState(false);
   const flatListRef = useRef(null);
 
-  // Date/Time formatting functions
+  // Date/Time formatting
   const formatDateString = (dateString) => {
     if (!dateString || typeof dateString !== 'string') return 'Not specified';
     try {
@@ -70,7 +70,6 @@ export default function RoomDetails() {
         year: 'numeric',
       });
     } catch (error) {
-      console.error('Error formatting date string:', error);
       return dateString;
     }
   };
@@ -129,7 +128,6 @@ export default function RoomDetails() {
       setMessage('');
       flatListRef.current?.scrollToEnd({ animated: true });
     } catch (error) {
-      console.error('Error sending message:', error);
       Alert.alert('Error', 'Failed to send message');
     }
   };
@@ -202,7 +200,8 @@ export default function RoomDetails() {
 
   useEffect(() => {
     if (!id) return;
-    setIsLoading(true);
+    
+    // 1. Listen to Room Document
     const roomRef = doc(db, 'rooms', id);
     const unsubscribeRoom = onSnapshot(roomRef, async (docSnap) => {
       if (!docSnap.exists()) {
@@ -213,8 +212,8 @@ export default function RoomDetails() {
       }
       const roomData = docSnap.data();
       setRoom(roomData);
-      setIsLoading(false);
       
+      // Process Join Requests
       const uids = roomData?.requests || [];
       const timestamps = roomData?.requestTimestamps || {};
 
@@ -223,25 +222,21 @@ export default function RoomDetails() {
           const requests = [];
           for (let i = 0; i < uids.length; i++) {
             const uid = uids[i];
+            if (!uid) continue; // Skip invalid UIDs
+
             try {
               const userSnap = await getDoc(doc(db, 'users', uid));
-              if (!userSnap.exists()) {
-                requests.push({ uid, nickname: `User-${uid.substring(0, 8)}`, major: 'Unknown', requestedAt: new Date() });
-                continue;
-              }
-              const userData = userSnap.data();
-              const nickname = userData?.instagram || userData?.nickname || `User-${uid.substring(0, 8)}`;
-              const major = userData?.major || 'Not specified';
+              const nickname = userSnap.exists() ? (userSnap.data().instagram || userSnap.data().nickname) : `User-${uid.substr(0,5)}`;
+              const major = userSnap.exists() ? userSnap.data().major : 'Unknown';
+              
               let requestedAt = new Date();
               if (timestamps[uid]) {
-                try {
-                  if (timestamps[uid].toDate) requestedAt = timestamps[uid].toDate();
-                  else if (timestamps[uid].seconds) requestedAt = new Date(timestamps[uid].seconds * 1000);
-                } catch (e) {}
+                 if (timestamps[uid].toDate) requestedAt = timestamps[uid].toDate();
+                 else if (timestamps[uid].seconds) requestedAt = new Date(timestamps[uid].seconds * 1000);
               }
               requests.push({ uid, nickname, major, requestedAt });
             } catch (e) {
-               requests.push({ uid, nickname: `User-${uid.substring(0, 8)}`, major: 'Unknown', requestedAt: new Date() });
+              console.log('Error fetching request user', e);
             }
           }
           requests.sort((a, b) => (a.requestedAt?.getTime() || 0) - (b.requestedAt?.getTime() || 0));
@@ -252,11 +247,9 @@ export default function RoomDetails() {
       } else {
         setJoinRequests([]);
       }
-    }, (error) => {
-      setIsLoading(false);
-      Alert.alert('Error', 'Could not load room details.');
     });
 
+    // 2. Listen to Participants Subcollection
     let unsubscribeParticipants;
     if (auth.currentUser?.uid) {
       const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
@@ -264,22 +257,32 @@ export default function RoomDetails() {
         try {
           const list = await Promise.all(snapshot.docs.map(async (docSnap) => {
             const data = docSnap.data();
+            
+            // --- SAFETY CHECK: PREVENT CRASH ON INVALID UID ---
+            if (!data.uid || typeof data.uid !== 'string') {
+              return null; 
+            }
+
             try {
               const userDoc = await getDoc(doc(db, 'users', data.uid));
-              if (!userDoc.exists()) return { uid: data.uid, nickname: `User-${data.uid.substring(0, 8)}`, major: 'Unknown' };
-              const userData = userDoc.data();
-              const nickname = userData?.instagram || userData?.nickname || `User-${data.uid.substring(0, 8)}`;
-              const major = userData?.major || 'Not specified';
+              const userData = userDoc.exists() ? userDoc.data() : {};
+              
+              const nickname = userData.instagram || userData.nickname || `User-${data.uid.substr(0,5)}`;
+              const major = userData.major || 'Not specified';
+              
               return { uid: data.uid, nickname, major };
             } catch (e) {
-              return { uid: data.uid, nickname: `User-${data.uid.substring(0, 8)}`, major: 'Unknown' };
+              return { uid: data.uid, nickname: 'Unknown User', major: '' };
             }
           }));
-          setParticipants(list);
-        } catch (e) {}
+          
+          // Filter out any nulls from invalid UIDs
+          setParticipants(list.filter(p => p !== null));
+          
+        } catch (e) {
+          console.error("Error processing participants", e);
+        }
       });
-    } else {
-      setParticipants([]);
     }
 
     return () => {
@@ -406,7 +409,6 @@ export default function RoomDetails() {
       keyboardVerticalOffset={0}
     >
       <SafeAreaView style={styles.container}>
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerContent}>
             <View style={styles.headerLeft}>
@@ -436,10 +438,8 @@ export default function RoomDetails() {
           </View>
         </View>
 
-        {/* Chat Modal */}
         <Modal visible={showChat} animationType="slide" presentationStyle="pageSheet">
           <View style={styles.chatContainer}>
-             {/* Chat Header */}
             <View style={styles.chatHeader}>
               <View style={styles.chatHeaderContent}>
                 <Text style={styles.chatTitle}>💬 Room Chat</Text>
@@ -449,7 +449,6 @@ export default function RoomDetails() {
               </View>
             </View>
 
-            {/* Messages */}
             <FlatList
               ref={flatListRef}
               data={messages}
@@ -461,7 +460,6 @@ export default function RoomDetails() {
               showsVerticalScrollIndicator={false}
             />
 
-            {/* Input */}
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}>
               <View style={styles.inputContainer}>
                 <View style={styles.inputWrapper}>
@@ -488,13 +486,11 @@ export default function RoomDetails() {
           </View>
         </Modal>
 
-        {/* Content ScrollView */}
         <ScrollView 
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={true}
         >
-          {/* Room Info Card */}
           <View style={styles.infoCard}>
             <View style={styles.cardHeader}>
               <Text style={styles.cardTitle}>🍺 Room Details</Text>
@@ -550,7 +546,6 @@ export default function RoomDetails() {
             </View>
           </View>
 
-          {/* Participants Section */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>👥 Participants</Text>
@@ -601,7 +596,6 @@ export default function RoomDetails() {
             </View>
           </View>
 
-          {/* Requests Section */}
           {isCreator && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
@@ -654,7 +648,6 @@ export default function RoomDetails() {
             </View>
           )}
 
-          {/* Join/Cancel Prompt */}
           {!isParticipant && !isCreator && (
             <View style={styles.section}>
               <View style={styles.joinPrompt}>
@@ -679,12 +672,10 @@ export default function RoomDetails() {
           )}
         </ScrollView>
 
-        {/* User Profile Modal */}
         <Modal visible={showUserProfile} animationType="slide" presentationStyle="pageSheet">
           {selectedUserProfile && <UserProfile uid={selectedUserProfile} onClose={closeUserProfile} />}
         </Modal>
 
-        {/* Report Modal */}
         <Modal visible={reportModalVisible} transparent={true} animationType="fade">
           <View style={styles.reportModalOverlay}>
             <View style={styles.reportModalContainer}>
@@ -722,637 +713,119 @@ export default function RoomDetails() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#4A3B47', // Dark Pink/Purple Background
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#4A3B47',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingCard: {
-    backgroundColor: '#5A4B5C',
-    padding: 32,
-    borderRadius: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#7A6B7D',
-  },
-  loadingText: {
-    color: '#E8A4C7',
-    fontSize: 16,
-    fontWeight: '500',
-    marginTop: 16,
-  },
-
-  // Header
-  header: {
-    backgroundColor: '#4A3B47',
-    borderBottomWidth: 1,
-    borderBottomColor: '#5A4B5C',
-    paddingTop: Platform.OS === 'ios' ? 0 : 10,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 12,
-  },
-  titleContainer: {
-    flex: 1,
-    marginRight: 12,
-  },
-  title: {
-    color: '#E8A4C7', // Pink title
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  subtitle: {
-    color: '#E8D5DA',
-    fontSize: 14,
-    fontWeight: '400',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  chatToggleButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  chatToggleButtonActive: {
-    backgroundColor: '#E8A4C7',
-  },
-  deleteButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // Scroll Content
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: 100,
-  },
-
-  // Info Card
-  infoCard: {
-    backgroundColor: '#E8D5DA', // Light Beige/Pink Card
-    marginHorizontal: 20,
-    marginTop: 20,
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#3A6A6F', // Teal Border
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  cardTitle: {
-    color: '#4d4c41', // Dark Text
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  creatorBadge: {
-    backgroundColor: '#E1B604', // Mustard
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  creatorBadgeText: {
-    color: '#1C6F75', // Teal text on mustard
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  infoGrid: {
-    gap: 16,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoLabel: {
-    color: '#1C6F75',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  infoValue: {
-    color: '#4d4c41',
-    fontSize: 16,
-    fontWeight: '400',
-    lineHeight: 22,
-  },
-
-  // Section
-  section: {
-    marginHorizontal: 20,
-    marginTop: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    color: '#E8A4C7',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  participantCount: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  participantCountText: {
-    color: '#E8D5DA',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  requestCount: {
-    backgroundColor: '#E1B604',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  requestCountText: {
-    color: '#1C6F75',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-
-  // Participants
-  participantsList: {
-    gap: 12,
-  },
-  participantCard: {
-    backgroundColor: '#E8D5DA',
-    padding: 16,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#3A6A6F',
-  },
-  firstParticipantCard: {
-    borderWidth: 2,
-    borderColor: '#E1B604', // Gold border for first/creator
-  },
-  participantLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  participantAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#1C6F75', // Teal Avatar
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  participantAvatarText: {
-    color: '#E8D5DA',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  participantInfo: {
-    flex: 1,
-  },
-  participantNameContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  participantName: {
-    color: '#4d4c41',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  clickableUsername: {
-    textDecorationLine: 'underline',
-  },
-  hostBadge: {
-    color: '#E1B604',
-    fontWeight: 'bold',
-  },
-  youBadge: {
-    color: '#1C6F75',
-    fontWeight: 'bold',
-  },
-  participantMajor: {
-    color: '#666',
-    fontSize: 14,
-  },
-  reportButton: {
-    marginLeft: 8,
-    padding: 4,
-  },
-  kickButton: {
-    backgroundColor: '#C62828',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  kickButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-
-  // Requests
-  approveAllButton: {
-    backgroundColor: '#1C6F75',
-    padding: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  approveAllText: {
-    color: '#E8D5DA',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  requestsList: {
-    gap: 12,
-  },
-  requestCard: {
-    backgroundColor: '#E8D5DA',
-    padding: 16,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 2,
-    borderColor: '#E1B604', // Mustard Border for requests
-  },
-  requestLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  requestAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#E1B604',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  requestAvatarText: {
-    color: '#1C6F75',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  requestInfo: {
-    flex: 1,
-  },
-  requestName: {
-    color: '#4d4c41',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  requestMajor: {
-    color: '#666',
-    fontSize: 14,
-  },
-  requestActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  approveButton: {
-    backgroundColor: '#1C6F75',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  declineButton: {
-    backgroundColor: '#C62828',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  // Chat
-  chatContainer: {
-    flex: 1,
-    backgroundColor: '#4A3B47',
-  },
-  chatHeader: {
-    backgroundColor: '#5A4B5C',
-    paddingTop: Platform.OS === 'ios' ? 20 : 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#7A6B7D',
-  },
-  chatHeaderContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-  },
-  chatTitle: {
-    color: '#E8A4C7',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  closeChatButton: {
-    padding: 8,
-  },
-  messagesFlatList: {
-    flex: 1,
-    backgroundColor: '#4A3B47',
-  },
-  flatListContent: {
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-  },
-  messageContainer: {
-    marginBottom: 12,
-  },
-  myMessage: {
-    alignItems: 'flex-end',
-  },
-  otherMessage: {
-    alignItems: 'flex-start',
-  },
-  messageBubble: {
-    maxWidth: '80%',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-  },
-  myMessageBubble: {
-    backgroundColor: '#E8D5DA', // Light bubble for me
-    borderBottomRightRadius: 4,
-  },
-  otherMessageBubble: {
-    backgroundColor: '#5A4B5C', // Darker bubble for others
-    borderBottomLeftRadius: 4,
-  },
-  senderName: {
-    color: '#E8A4C7',
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  messageText: {
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  myMessageText: {
-    color: '#4d4c41', // Dark text on light bubble
-  },
-  otherMessageText: {
-    color: '#E8D5DA', // Light text on dark bubble
-  },
-  timestamp: {
-    fontSize: 10,
-    marginTop: 4,
-    alignSelf: 'flex-end',
-  },
-  myTimestamp: {
-    color: '#666',
-  },
-  otherTimestamp: {
-    color: '#aaa',
-  },
-  inputContainer: {
-    backgroundColor: '#5A4B5C',
-    paddingBottom: Platform.OS === 'ios' ? 30 : 16,
-    borderTopWidth: 1,
-    borderTopColor: '#7A6B7D',
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    gap: 12,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: '#4A3B47',
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    color: '#E8D5DA',
-    fontSize: 15,
-    maxHeight: 100,
-    borderWidth: 1,
-    borderColor: '#7A6B7D',
-  },
-  inputDisabled: {
-    opacity: 0.6,
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#E1B604',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sendButtonDisabled: {
-    backgroundColor: '#7A6B7D',
-  },
-
-  // Join Prompt
-  joinPrompt: {
-    backgroundColor: '#E8D5DA',
-    padding: 24,
-    borderRadius: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#3A6A6F',
-  },
-  joinPromptIcon: {
-    fontSize: 32,
-    marginBottom: 12,
-  },
-  joinPromptText: {
-    color: '#4d4c41',
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  joinButton: {
-    backgroundColor: '#1C6F75',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 20,
-    minWidth: 180,
-    alignItems: 'center',
-  },
-  joinButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  pendingContainer: {
-    alignItems: 'center',
-    gap: 12,
-  },
-  pendingBadge: {
-    backgroundColor: '#E1B604',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-  },
-  pendingText: {
-    color: '#1C6F75',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  cancelRequestButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  cancelRequestButtonText: {
-    color: '#C62828',
-    fontSize: 14,
-    fontWeight: '500',
-    textDecorationLine: 'underline',
-  },
-
-  // Empty State
-  emptyState: {
-    alignItems: 'center',
-    padding: 32,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16,
-  },
-  emptyIcon: {
-    fontSize: 32,
-    marginBottom: 8,
-  },
-  emptyText: {
-    color: '#E8D5DA',
-    fontSize: 16,
-    opacity: 0.7,
-  },
-
-  // Report Modal
-  reportModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  reportModalContainer: {
-    backgroundColor: '#5A4B5C',
-    borderRadius: 20,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
-    borderWidth: 1,
-    borderColor: '#7A6B7D',
-  },
-  reportModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  reportModalTitle: {
-    color: '#E8A4C7',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  reportModalClose: {
-    padding: 4,
-  },
-  reportModalSubtitle: {
-    color: '#E8D5DA',
-    fontSize: 16,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  reportReasonInput: {
-    backgroundColor: '#4A3B47',
-    borderRadius: 12,
-    padding: 16,
-    color: '#E8D5DA',
-    fontSize: 15,
-    minHeight: 120,
-    textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: '#7A6B7D',
-    marginBottom: 24,
-  },
-  reportModalButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  reportCancelButton: {
-    flex: 1,
-    backgroundColor: '#7A6B7D',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  reportCancelButtonText: {
-    color: '#E8D5DA',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  reportSubmitButton: {
-    flex: 1,
-    backgroundColor: '#C62828',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  reportSubmitButtonDisabled: {
-    opacity: 0.5,
-  },
-  reportSubmitButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  container: { flex: 1, backgroundColor: '#4A3B47' },
+  loadingContainer: { flex: 1, backgroundColor: '#4A3B47', justifyContent: 'center', alignItems: 'center' },
+  loadingCard: { backgroundColor: '#5A4B5C', padding: 32, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#7A6B7D' },
+  loadingText: { color: '#E8A4C7', fontSize: 16, fontWeight: '500', marginTop: 16 },
+  header: { backgroundColor: '#4A3B47', borderBottomWidth: 1, borderBottomColor: '#5A4B5C', paddingTop: Platform.OS === 'ios' ? 0 : 10 },
+  headerContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  backButton: { padding: 8, marginRight: 12 },
+  titleContainer: { flex: 1, marginRight: 12 },
+  title: { color: '#E8A4C7', fontSize: 20, fontWeight: 'bold', marginBottom: 2 },
+  subtitle: { color: '#E8D5DA', fontSize: 14, fontWeight: '400' },
+  headerRight: { flexDirection: 'row', gap: 8 },
+  chatToggleButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  chatToggleButtonActive: { backgroundColor: '#E8A4C7' },
+  deleteButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  scrollView: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingBottom: 100 },
+  infoCard: { backgroundColor: '#E8D5DA', marginHorizontal: 20, marginTop: 20, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#3A6A6F', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 3 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  cardTitle: { color: '#4d4c41', fontSize: 20, fontWeight: 'bold' },
+  creatorBadge: { backgroundColor: '#E1B604', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
+  creatorBadgeText: { color: '#1C6F75', fontSize: 12, fontWeight: 'bold' },
+  infoGrid: { gap: 16 },
+  infoItem: { flexDirection: 'row', alignItems: 'flex-start' },
+  infoContent: { flex: 1 },
+  infoLabel: { color: '#1C6F75', fontSize: 14, fontWeight: '600', marginBottom: 2 },
+  infoValue: { color: '#4d4c41', fontSize: 16, fontWeight: '400', lineHeight: 22 },
+  section: { marginHorizontal: 20, marginTop: 24 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  sectionTitle: { color: '#E8A4C7', fontSize: 18, fontWeight: 'bold' },
+  participantCount: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  participantCountText: { color: '#E8D5DA', fontSize: 14, fontWeight: '600' },
+  requestCount: { backgroundColor: '#E1B604', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  requestCountText: { color: '#1C6F75', fontSize: 14, fontWeight: 'bold' },
+  participantsList: { gap: 12 },
+  participantCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#3A6A6F' },
+  firstParticipantCard: { borderWidth: 2, borderColor: '#E1B604' },
+  participantLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  participantAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1C6F75', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  participantAvatarText: { color: '#E8D5DA', fontSize: 18, fontWeight: 'bold' },
+  participantInfo: { flex: 1 },
+  participantNameContainer: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  participantName: { color: '#4d4c41', fontSize: 16, fontWeight: '600' },
+  clickableUsername: { textDecorationLine: 'underline' },
+  hostBadge: { color: '#E1B604', fontWeight: 'bold' },
+  youBadge: { color: '#1C6F75', fontWeight: 'bold' },
+  participantMajor: { color: '#666', fontSize: 14 },
+  reportButton: { marginLeft: 8, padding: 4 },
+  kickButton: { backgroundColor: '#C62828', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+  kickButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  approveAllButton: { backgroundColor: '#1C6F75', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
+  approveAllText: { color: '#E8D5DA', fontSize: 14, fontWeight: 'bold' },
+  requestsList: { gap: 12 },
+  requestCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#E1B604' },
+  requestLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  requestAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  requestAvatarText: { color: '#1C6F75', fontSize: 18, fontWeight: 'bold' },
+  requestInfo: { flex: 1 },
+  requestName: { color: '#4d4c41', fontSize: 16, fontWeight: '600' },
+  requestMajor: { color: '#666', fontSize: 14 },
+  requestActions: { flexDirection: 'row', gap: 8 },
+  approveButton: { backgroundColor: '#1C6F75', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  declineButton: { backgroundColor: '#C62828', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  chatContainer: { flex: 1, backgroundColor: '#4A3B47' },
+  chatHeader: { backgroundColor: '#5A4B5C', paddingTop: Platform.OS === 'ios' ? 20 : 10, borderBottomWidth: 1, borderBottomColor: '#7A6B7D' },
+  chatHeaderContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
+  chatTitle: { color: '#E8A4C7', fontSize: 18, fontWeight: 'bold' },
+  closeChatButton: { padding: 8 },
+  messagesFlatList: { flex: 1, backgroundColor: '#4A3B47' },
+  flatListContent: { paddingVertical: 20, paddingHorizontal: 16 },
+  messageContainer: { marginBottom: 12 },
+  myMessage: { alignItems: 'flex-end' },
+  otherMessage: { alignItems: 'flex-start' },
+  messageBubble: { maxWidth: '80%', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20 },
+  myMessageBubble: { backgroundColor: '#E8D5DA', borderBottomRightRadius: 4 },
+  otherMessageBubble: { backgroundColor: '#5A4B5C', borderBottomLeftRadius: 4 },
+  senderName: { color: '#E8A4C7', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
+  messageText: { fontSize: 15, lineHeight: 20 },
+  myMessageText: { color: '#4d4c41' },
+  otherMessageText: { color: '#E8D5DA' },
+  timestamp: { fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
+  myTimestamp: { color: '#666' },
+  otherTimestamp: { color: '#aaa' },
+  inputContainer: { backgroundColor: '#5A4B5C', paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: '#7A6B7D' },
+  inputWrapper: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, gap: 12 },
+  input: { flex: 1, backgroundColor: '#4A3B47', borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12, color: '#E8D5DA', fontSize: 15, maxHeight: 100, borderWidth: 1, borderColor: '#7A6B7D' },
+  inputDisabled: { opacity: 0.6 },
+  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center' },
+  sendButtonDisabled: { backgroundColor: '#7A6B7D' },
+  joinPrompt: { backgroundColor: '#E8D5DA', padding: 24, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#3A6A6F' },
+  joinPromptIcon: { fontSize: 32, marginBottom: 12 },
+  joinPromptText: { color: '#4d4c41', fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
+  joinButton: { backgroundColor: '#1C6F75', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, minWidth: 180, alignItems: 'center' },
+  joinButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  pendingContainer: { alignItems: 'center', gap: 12 },
+  pendingBadge: { backgroundColor: '#E1B604', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16 },
+  pendingText: { color: '#1C6F75', fontSize: 14, fontWeight: 'bold' },
+  cancelRequestButton: { paddingHorizontal: 16, paddingVertical: 8 },
+  cancelRequestButtonText: { color: '#C62828', fontSize: 14, fontWeight: '500', textDecorationLine: 'underline' },
+  emptyState: { alignItems: 'center', padding: 32, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16 },
+  emptyIcon: { fontSize: 32, marginBottom: 8 },
+  emptyText: { color: '#E8D5DA', fontSize: 16, opacity: 0.7 },
+  reportModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  reportModalContainer: { backgroundColor: '#5A4B5C', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, borderWidth: 1, borderColor: '#7A6B7D' },
+  reportModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  reportModalTitle: { color: '#E8A4C7', fontSize: 20, fontWeight: 'bold' },
+  reportModalClose: { padding: 4 },
+  reportModalSubtitle: { color: '#E8D5DA', fontSize: 16, marginBottom: 20, textAlign: 'center' },
+  reportReasonInput: { backgroundColor: '#4A3B47', borderRadius: 12, padding: 16, color: '#E8D5DA', fontSize: 15, minHeight: 120, textAlignVertical: 'top', borderWidth: 1, borderColor: '#7A6B7D', marginBottom: 24 },
+  reportModalButtons: { flexDirection: 'row', gap: 12 },
+  reportCancelButton: { flex: 1, backgroundColor: '#7A6B7D', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  reportCancelButtonText: { color: '#E8D5DA', fontSize: 16, fontWeight: 'bold' },
+  reportSubmitButton: { flex: 1, backgroundColor: '#C62828', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  reportSubmitButtonDisabled: { opacity: 0.5 },
+  reportSubmitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 });
