@@ -16,6 +16,7 @@ import { auth, db } from '../firebase/firebaseConfig';
 import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons'; // Added for Back Button
 
 export default function MyProfile() {
   const user = auth.currentUser;
@@ -24,9 +25,8 @@ export default function MyProfile() {
   const [major, setMajor] = useState('');
   const [age, setAge] = useState('');
   const [favDrink, setFavDrink] = useState('');
-  const [university, setUniversity] = useState(''); // New state for University
+  const [university, setUniversity] = useState(''); 
   
-  // Original states for change detection
   const [originalInstagram, setOriginalInstagram] = useState('');
   const [originalMajor, setOriginalMajor] = useState('');
   const [originalAge, setOriginalAge] = useState('');
@@ -36,12 +36,10 @@ export default function MyProfile() {
   const [updating, setUpdating] = useState(false);
   const [userStats, setUserStats] = useState({ roomsCreated: 0, roomsJoined: 0 });
   
-  // Instagram edit modal state
   const [showInstagramModal, setShowInstagramModal] = useState(false);
   const [tempInstagram, setTempInstagram] = useState('');
   const [updatingInstagram, setUpdatingInstagram] = useState(false);
 
-  // Helper to extract university from email if not in DB
   const getUniversityFromEmail = (email) => {
     if (!email) return '';
     try {
@@ -71,10 +69,8 @@ export default function MyProfile() {
         const fetchedAge = data.age ? data.age.toString() : '';
         const fetchedFavDrink = data.favDrink || '';
 
-        // SMART UNIVERSITY CHECK
         let fetchedUniversity = data.university;
         if (!fetchedUniversity) {
-            // If missing in DB, calculate it from the Auth email
             fetchedUniversity = getUniversityFromEmail(user.email);
         }
 
@@ -109,7 +105,6 @@ export default function MyProfile() {
     }
   }, [user]);
 
-  // Validate age
   const validateAge = (ageString) => {
     const ageNum = parseInt(ageString);
     if (isNaN(ageNum)) return { valid: false, message: 'Please enter a valid age' };
@@ -259,8 +254,17 @@ export default function MyProfile() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header with Back Button */}
+      <View style={styles.headerRow}>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={28} color="#E8A4C7" />
+        </Pressable>
+        <Text style={styles.headerTitle}></Text>
+        <View style={{width: 28}} />
+      </View>
+
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.header}>🍺 my profile</Text>
+        <Text style={styles.pageTitle}>🍺 my profile</Text>
         
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
@@ -278,7 +282,7 @@ export default function MyProfile() {
           
           <View style={styles.userInfo}>
             <Text style={styles.name}>{instagram || 'No Instagram username set'}</Text>
-            {/* UNIVERSITY DISPLAY ADDED HERE */}
+            
             {university ? (
                <Text style={styles.university}>🏛️ {university}</Text>
             ) : null}
@@ -415,6 +419,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#4A3B47',
   },
+  // Header styles
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
+  backButton: {
+    padding: 4,
+    marginLeft: -4,
+  },
+  headerTitle: {
+    color: '#E8A4C7',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  
   scrollContent: {
     padding: 20,
     paddingTop: 10,
@@ -430,7 +453,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
   },
-  header: {
+  pageTitle: {
     fontSize: 34,
     fontWeight: 'bold',
     color: '#E8A4C7',
@@ -504,7 +527,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   university: {
-    color: '#E1B604', // Mustard Yellow to stand out
+    color: '#E1B604', // Mustard Yellow
     fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 8,

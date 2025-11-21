@@ -84,7 +84,7 @@ export default function Home() {
         {/* 1. HEADER SECTION */}
         <View style={styles.headerSection}>
           <Text style={styles.title}>birabuddy</Text>
-          <Text style={styles.subtitle}>have fun, be casual</Text>
+          <Text style={styles.subtitle}>have fun!</Text>
         </View>
 
         {/* 2. DYNAMIC CONTENT (Active Rooms) */}

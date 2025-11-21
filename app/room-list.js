@@ -25,7 +25,6 @@ import {
 } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
 
-// Defined outside the component to prevent re-creation
 const NEIGHBORHOODS = ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'];
 
 export default function JoinRoom() {
@@ -36,22 +35,18 @@ export default function JoinRoom() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // --- MODAL VISIBILITY ---
   const [isFilterVisible, setIsFilterVisible] = useState(false);
 
-  // --- ACTIVE FILTERS (Used to filter the list) ---
   const [activeName, setActiveName] = useState('');
-  const [activeLocations, setActiveLocations] = useState([]); // Array for multiple selections
+  const [activeLocations, setActiveLocations] = useState([]); 
   const [activeDay, setActiveDay] = useState(null);
   const [activeTimeStart, setActiveTimeStart] = useState(null);
 
-  // --- TEMPORARY FILTERS (Used inside the modal while selecting) ---
   const [tempName, setTempName] = useState('');
   const [tempLocations, setTempLocations] = useState([]);
   const [tempDay, setTempDay] = useState(null);
   const [tempTimeStart, setTempTimeStart] = useState(null);
 
-  // Prepare filter data
   const next7Days = useMemo(() => {
     const days = [];
     for (let i = 0; i < 7; i++) {
@@ -66,15 +61,15 @@ export default function JoinRoom() {
   }, []);
 
   const timeSlots = [
+    { label: 'Before 18:00', start: -1 },
     { label: '18:00-19:00', start: 18 },
     { label: '19:00-20:00', start: 19 },
     { label: '20:00-21:00', start: 20 },
     { label: '21:00-22:00', start: 21 },
     { label: '22:00-23:00', start: 22 },
     { label: '23:00-00:00', start: 23 },
+    { label: '00:00+', start: 24 }, 
   ];
-
-  // --- HELPER FUNCTIONS ---
 
   const formatDateTimeShort = (dateStr, timeStr) => {
     if (!dateStr || !timeStr) return 'unknown';
@@ -89,7 +84,6 @@ export default function JoinRoom() {
     }) + ' • ' + timeStr;
   };
 
-  // Handle opening the modal (sync temp state with active state)
   const openFilterModal = () => {
     setTempName(activeName);
     setTempLocations([...activeLocations]);
@@ -98,7 +92,6 @@ export default function JoinRoom() {
     setIsFilterVisible(true);
   };
 
-  // Handle applying filters (sync active state with temp state)
   const applyFilters = () => {
     setActiveName(tempName);
     setActiveLocations(tempLocations);
@@ -107,7 +100,6 @@ export default function JoinRoom() {
     setIsFilterVisible(false);
   };
 
-  // Handle clearing filters inside modal
   const clearFilters = () => {
     setTempName('');
     setTempLocations([]);
@@ -115,7 +107,6 @@ export default function JoinRoom() {
     setTempTimeStart(null);
   };
 
-  // Toggle a neighborhood in the temp array
   const toggleNeighborhood = (neighborhood) => {
     if (tempLocations.includes(neighborhood)) {
       setTempLocations(tempLocations.filter(loc => loc !== neighborhood));
@@ -124,7 +115,6 @@ export default function JoinRoom() {
     }
   };
 
-  // --- DATA FETCHING ---
   useEffect(() => {
     let unsubscribe = null;
     let participantUnsubscribes = [];
@@ -209,7 +199,6 @@ export default function JoinRoom() {
     };
   }, []);
 
-  // --- MAIN FILTERING LOGIC (Uses active... states) ---
   const availableRooms = useMemo(() => {
     let filtered = rooms.filter((room) => {
       const max = room.maxParticipants || 0;
@@ -218,30 +207,28 @@ export default function JoinRoom() {
       
       if (current >= max || isUserInRoom) return false;
 
-      // 1. Name Filter
       if (activeName && !room.name.toLowerCase().includes(activeName.toLowerCase())) return false;
 
-      // 2. Location Filter (Multi-select)
-      // If activeLocations has items, the room's neighborhood MUST be one of them.
       if (activeLocations.length > 0) {
         const roomLoc = (room.neighborhood || room.location || '').toLowerCase();
-        // We check if the room location includes any of the selected neighborhoods
-        // or if the exact neighborhood string is in the list.
-        // Since data might be "besiktas", and filter is "besiktas", exact match is best,
-        // but case-insensitive check is safer.
         const match = activeLocations.some(selectedLoc => 
           roomLoc.includes(selectedLoc.toLowerCase())
         );
         if (!match) return false;
       }
 
-      // 3. Day Filter
       if (activeDay && room.date !== activeDay) return false;
 
-      // 4. Time Filter
       if (activeTimeStart !== null) {
         const roomHour = parseInt(room.time.split(':')[0], 10);
-        if (roomHour !== activeTimeStart) return false;
+        
+        if (activeTimeStart === -1) {
+          if (roomHour >= 18) return false;
+        } else if (activeTimeStart === 24) {
+          if (roomHour >= 6) return false; 
+        } else {
+          if (roomHour !== activeTimeStart) return false;
+        }
       }
 
       return true;
@@ -263,7 +250,7 @@ export default function JoinRoom() {
         requests: arrayUnion(currentUser.uid),
         requestTimestamps: { [currentUser.uid]: serverTimestamp() }
       });
-      Alert.alert('Request Sent', 'Good luck!');
+  
     } catch (error) {
       Alert.alert('Error', error.message);
     }
@@ -280,6 +267,12 @@ export default function JoinRoom() {
       >
         <View style={styles.cardLeft}>
           <Text style={styles.title} numberOfLines={1}>{item.name}</Text>
+          
+          {/* DESCRIPTION ADDED HERE */}
+          {item.description ? (
+            <Text style={styles.description} numberOfLines={1}>{item.description}</Text>
+          ) : null}
+
           <View style={styles.infoRow}>
             <Ionicons name="location-outline" size={14} color="#4d4c41" />
             <Text style={styles.location} numberOfLines={1}>{item.neighborhood || item.location}</Text>
@@ -319,22 +312,32 @@ export default function JoinRoom() {
   if (loading || !currentUser) {
     return (
       <SafeAreaView style={styles.container}>
-        <Text style={styles.header}>join a meetup 🍻</Text>
-        <Text style={styles.emptyText}>Loading...</Text>
+        <View style={styles.header}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+          </Pressable>
+          <Text style={styles.headerTitle}>join a meetup 🍻</Text>
+          <View style={{width: 40}} /> 
+        </View>
+        <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
+          <Text style={styles.emptyText}>Loading...</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.topRow}>
-        <Text style={styles.header}>join a meetup 🍻</Text>
+      <View style={styles.header}>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+        </Pressable>
+        <Text style={styles.headerTitle}>join a meetup 🍻</Text>
         <Pressable style={styles.filterIconBtn} onPress={openFilterModal}>
           <Ionicons name="filter" size={24} color="#E1B604" />
         </Pressable>
       </View>
 
-      {/* --- MODAL IS NOW DIRECTLY IN RENDER --- */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -349,9 +352,7 @@ export default function JoinRoom() {
                 <Ionicons name="close" size={24} color="#4A3B47" />
               </Pressable>
             </View>
-            
             <ScrollView showsVerticalScrollIndicator={false}>
-              {/* 1. NAME */}
               <Text style={styles.filterLabel}>Room Name</Text>
               <TextInput 
                 style={styles.input} 
@@ -359,8 +360,6 @@ export default function JoinRoom() {
                 value={tempName}
                 onChangeText={setTempName}
               />
-
-              {/* 2. NEIGHBORHOODS (Multi-Select) */}
               <Text style={styles.filterLabel}>Neighborhoods</Text>
               <View style={styles.wrapContainer}>
                 {NEIGHBORHOODS.map((hood) => {
@@ -378,8 +377,6 @@ export default function JoinRoom() {
                   );
                 })}
               </View>
-
-              {/* 3. DAY */}
               <Text style={styles.filterLabel}>Day</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
                 <Pressable 
@@ -400,8 +397,6 @@ export default function JoinRoom() {
                   </Pressable>
                 ))}
               </ScrollView>
-
-              {/* 4. TIME */}
               <Text style={styles.filterLabel}>Time Interval</Text>
               <View style={styles.wrapContainer}>
                 <Pressable 
@@ -423,7 +418,6 @@ export default function JoinRoom() {
                 ))}
               </View>
             </ScrollView>
-
             <View style={styles.modalFooter}>
               <Pressable style={styles.clearButton} onPress={clearFilters}>
                 <Text style={styles.clearButtonText}>Clear All</Text>
@@ -441,7 +435,6 @@ export default function JoinRoom() {
           <Text style={styles.emptyText}>no rooms found</Text>
           <Pressable 
              onPress={() => {
-               // Clear Active Filters directly
                setActiveName('');
                setActiveLocations([]);
                setActiveDay(null);
@@ -469,15 +462,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#4A3B47',
   },
-  topRow: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 10,
     paddingHorizontal: 20,
-    marginTop: 20,
-    marginBottom: 10,
+    backgroundColor: '#4A3B47',
   },
-  header: {
+  backButton: {
+    padding: 4,
+  },
+  headerTitle: {
     fontSize: 22,
     fontWeight: 'bold',
     color: '#E8A4C7',
@@ -519,7 +516,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#4d4c41',
+    marginBottom: 2,
+  },
+  description: {
+    fontSize: 13,
+    color: '#666',
     marginBottom: 6,
+    fontStyle: 'italic',
   },
   infoRow: {
     flexDirection: 'row',
@@ -580,7 +583,6 @@ const styles = StyleSheet.create({
     color: '#E8A4C7',
     fontSize: 16,
   },
-  // --- MODAL STYLES ---
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -591,7 +593,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 25,
     borderTopRightRadius: 25,
     padding: 20,
-    height: '85%', // Slightly taller for more filters
+    height: '85%',
   },
   modalHeader: {
     flexDirection: 'row',

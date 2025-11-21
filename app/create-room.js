@@ -11,10 +11,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  SafeAreaView // Added SafeAreaView
 } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
 import { useButtonDelay } from '../hooks/useButtonDelay';
+import { Ionicons } from '@expo/vector-icons'; // Added Ionicons
 
 export default function CreateRoom() {
   const [name, setName] = useState('');
@@ -164,7 +166,6 @@ export default function CreateRoom() {
 
       Alert.alert('Room Created', 'Your room was successfully created.');
       
-      // 👇 FIXED: Used replace instead of push
       router.replace('/my-rooms');
       
     } catch (error) {
@@ -205,13 +206,6 @@ export default function CreateRoom() {
     setShowTimePicker(!showTimePicker);
   };
 
-  const formatDateForDisplay = (date) => {
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}.${month}.${year}`;
-  };
-
   const formatTimeForDisplay = (time) => {
     const hours = String(time.getHours()).padStart(2, '0');
     const minutes = String(time.getMinutes()).padStart(2, '0');
@@ -219,198 +213,219 @@ export default function CreateRoom() {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1 }}
-    >
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>🍺 create a room</Text>
-        <Text style={styles.subtitle}>feel free!</Text>
-        
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={[
-              styles.input,
-              name.length > NAME_LIMIT && styles.inputError
-            ]}
-            placeholder="room name"
-            placeholderTextColor="#999"
-            value={name}
-            onChangeText={setName}
-            maxLength={NAME_LIMIT + 10} 
-          />
-          <Text style={[
-            styles.characterCount,
-            name.length > NAME_LIMIT && styles.characterCountError
-          ]}>
-            {name.length}/{NAME_LIMIT}
-          </Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#4A3B47' }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
+        {/* Back Button Header */}
+        <View style={styles.headerRow}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={28} color="#E8A4C7" />
+          </Pressable>
         </View>
 
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={[
-              styles.input,
-              styles.textArea,
-              description.length > DESCRIPTION_LIMIT && styles.inputError
-            ]}
-            placeholder="description (optional)"
-            placeholderTextColor="#999"
-            value={description}
-            onChangeText={setDescription}
-            multiline={true}
-            numberOfLines={3}
-            textAlignVertical="top"
-            maxLength={DESCRIPTION_LIMIT + 10} 
-          />
-          <Text style={[
-            styles.characterCount,
-            description.length > DESCRIPTION_LIMIT && styles.characterCountError
-          ]}>
-            {description.length}/{DESCRIPTION_LIMIT}
-          </Text>
-        </View>
+        <ScrollView contentContainerStyle={styles.container}>
+          <Text style={styles.title}>🍺 create a room</Text>
+          <Text style={styles.subtitle}>feel free!</Text>
+          
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={[
+                styles.input,
+                name.length > NAME_LIMIT && styles.inputError
+              ]}
+              placeholder="room name"
+              placeholderTextColor="#999"
+              value={name}
+              onChangeText={setName}
+              maxLength={NAME_LIMIT + 10} 
+            />
+            <Text style={[
+              styles.characterCount,
+              name.length > NAME_LIMIT && styles.characterCountError
+            ]}>
+              {name.length}/{NAME_LIMIT}
+            </Text>
+          </View>
 
-        <Text style={styles.sectionTitle}>📍 Where to meet?</Text>
-        
-        <View style={styles.inputContainer}>
-          <Text style={styles.fieldLabel}>neighborhood:</Text>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.neighborhoodContainer}
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={[
+                styles.input,
+                styles.textArea,
+                description.length > DESCRIPTION_LIMIT && styles.inputError
+              ]}
+              placeholder="description (optional)"
+              placeholderTextColor="#999"
+              value={description}
+              onChangeText={setDescription}
+              multiline={true}
+              numberOfLines={3}
+              textAlignVertical="top"
+              maxLength={DESCRIPTION_LIMIT + 10} 
+            />
+            <Text style={[
+              styles.characterCount,
+              description.length > DESCRIPTION_LIMIT && styles.characterCountError
+            ]}>
+              {description.length}/{DESCRIPTION_LIMIT}
+            </Text>
+          </View>
+
+          <Text style={styles.sectionTitle}>📍 Where to meet?</Text>
+          
+          <View style={styles.inputContainer}>
+            <Text style={styles.fieldLabel}>neighborhood:</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.neighborhoodContainer}
+            >
+              {neighborhoods.map((hood, index) => (
+                <Pressable
+                  key={index}
+                  style={[
+                    styles.neighborhoodButton,
+                    neighborhood === hood && styles.neighborhoodButtonSelected
+                  ]}
+                  onPress={() => setNeighborhood(hood)}
+                >
+                  <Text style={[
+                    styles.neighborhoodButtonText,
+                    neighborhood === hood && styles.neighborhoodButtonTextSelected
+                  ]}>
+                    {hood}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.fieldLabel}>bar name:</Text>
+            <TextInput
+              style={[
+                styles.input,
+                barName.length > BAR_NAME_LIMIT && styles.inputError
+              ]}
+              placeholder="which bar or place?"
+              placeholderTextColor="#999"
+              value={barName}
+              onChangeText={setBarName}
+              maxLength={BAR_NAME_LIMIT + 10}
+            />
+            <Text style={[
+              styles.characterCount,
+              barName.length > BAR_NAME_LIMIT && styles.characterCountError
+            ]}>
+              {barName.length}/{BAR_NAME_LIMIT}
+            </Text>
+          </View>
+
+          <View style={styles.dateContainer}>
+            <Text style={styles.sectionTitle}>📅 Pick a day</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.dateButtonsContainer}
+            >
+              {next7Days.map((dayObj, index) => (
+                <Pressable
+                  key={index}
+                  style={[
+                    styles.dayButton,
+                    selectedDate.toDateString() === dayObj.date.toDateString() && styles.dayButtonSelected,
+                    dayObj.isToday && styles.todayButton
+                  ]}
+                  onPress={() => setSelectedDate(dayObj.date)}
+                >
+                  <Text style={[
+                    styles.dayButtonText,
+                    selectedDate.toDateString() === dayObj.date.toDateString() && styles.dayButtonTextSelected,
+                    dayObj.isToday && styles.todayButtonText
+                  ]}>
+                    {dayObj.shortDay}
+                  </Text>
+                  <Text style={[
+                    styles.dateButtonText,
+                    selectedDate.toDateString() === dayObj.date.toDateString() && styles.dateButtonTextSelected,
+                    dayObj.isToday && styles.todayDateText
+                  ]}>
+                    {dayObj.displayDate}
+                  </Text>
+                  {dayObj.isToday && (
+                    <Text style={styles.todayLabel}>today</Text>
+                  )}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+
+          <Pressable onPress={toggleTimePicker} style={styles.input}>
+            <Text style={styles.dateText}>
+              ⏰ {formatTimeForDisplay(selectedTime)}
+            </Text>
+          </Pressable>
+          
+          {showTimePicker && (
+            <DateTimePicker
+              value={selectedTime}
+              mode="time"
+              is24Hour={true}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={onTimeChange}
+            />
+          )}
+
+          <TextInput
+            style={styles.input}
+            placeholder="max people (2-10)"
+            placeholderTextColor="#999"
+            keyboardType="numeric"
+            value={maxPeople}
+            onChangeText={setMaxPeople}
+          />
+
+          <Pressable 
+            style={[
+              styles.button,
+              isDisabled && styles.buttonDisabled
+            ]} 
+            onPress={handleButtonPress}
+            disabled={isDisabled}
           >
-            {neighborhoods.map((hood, index) => (
-              <Pressable
-                key={index}
-                style={[
-                  styles.neighborhoodButton,
-                  neighborhood === hood && styles.neighborhoodButtonSelected
-                ]}
-                onPress={() => setNeighborhood(hood)}
-              >
-                <Text style={[
-                  styles.neighborhoodButtonText,
-                  neighborhood === hood && styles.neighborhoodButtonTextSelected
-                ]}>
-                  {hood}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
+            <Text style={[
+              styles.buttonText,
+              isDisabled && styles.buttonTextDisabled
+            ]}>
+              {isDisabled ? '⏳ creating room...' : '✨ create room'}
+            </Text>
+          </Pressable>
 
-        <View style={styles.inputContainer}>
-          <Text style={styles.fieldLabel}>bar name:</Text>
-          <TextInput
-            style={[
-              styles.input,
-              barName.length > BAR_NAME_LIMIT && styles.inputError
-            ]}
-            placeholder="which bar or place?"
-            placeholderTextColor="#999"
-            value={barName}
-            onChangeText={setBarName}
-            maxLength={BAR_NAME_LIMIT + 10}
-          />
-          <Text style={[
-            styles.characterCount,
-            barName.length > BAR_NAME_LIMIT && styles.characterCountError
-          ]}>
-            {barName.length}/{BAR_NAME_LIMIT}
-          </Text>
-        </View>
-
-        <View style={styles.dateContainer}>
-          <Text style={styles.sectionTitle}>📅 Pick a day (next 7 days only!)</Text>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.dateButtonsContainer}
-          >
-            {next7Days.map((dayObj, index) => (
-              <Pressable
-                key={index}
-                style={[
-                  styles.dayButton,
-                  selectedDate.toDateString() === dayObj.date.toDateString() && styles.dayButtonSelected,
-                  dayObj.isToday && styles.todayButton
-                ]}
-                onPress={() => setSelectedDate(dayObj.date)}
-              >
-                <Text style={[
-                  styles.dayButtonText,
-                  selectedDate.toDateString() === dayObj.date.toDateString() && styles.dayButtonTextSelected,
-                  dayObj.isToday && styles.todayButtonText
-                ]}>
-                  {dayObj.shortDay}
-                </Text>
-                <Text style={[
-                  styles.dateButtonText,
-                  selectedDate.toDateString() === dayObj.date.toDateString() && styles.dateButtonTextSelected,
-                  dayObj.isToday && styles.todayDateText
-                ]}>
-                  {dayObj.displayDate}
-                </Text>
-                {dayObj.isToday && (
-                  <Text style={styles.todayLabel}>today</Text>
-                )}
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-
-        <Pressable onPress={toggleTimePicker} style={styles.input}>
-          <Text style={styles.dateText}>
-            ⏰ {formatTimeForDisplay(selectedTime)}
-          </Text>
-        </Pressable>
-        
-        {showTimePicker && (
-          <DateTimePicker
-            value={selectedTime}
-            mode="time"
-            is24Hour={true}
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            onChange={onTimeChange}
-          />
-        )}
-
-        <TextInput
-          style={styles.input}
-          placeholder="max people (2-10)"
-          placeholderTextColor="#999"
-          keyboardType="numeric"
-          value={maxPeople}
-          onChangeText={setMaxPeople}
-        />
-
-        <Pressable 
-          style={[
-            styles.button,
-            isDisabled && styles.buttonDisabled
-          ]} 
-          onPress={handleButtonPress}
-          disabled={isDisabled}
-        >
-          <Text style={[
-            styles.buttonText,
-            isDisabled && styles.buttonTextDisabled
-          ]}>
-            {isDisabled ? '⏳ creating room...' : '✨ create room'}
-          </Text>
-        </Pressable>
-
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  // Header row style for the back button
+  headerRow: {
+    paddingHorizontal: 20,
+    paddingTop: 10, // Minimal padding from top safe area
+    paddingBottom: 0,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
+  backButton: {
+    padding: 8,
+    marginLeft: -8, // Align with padding
+  },
   container: {
     backgroundColor: '#4A3B47',
     padding: 24,
-    paddingTop: 60,
+    paddingTop: 10, // Reduced top padding since header is above
     flexGrow: 1,
   },
   title: {
@@ -577,7 +592,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 20,
-    marginBottom: 40, // Added extra margin at bottom for scrolling
+    marginBottom: 40,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
