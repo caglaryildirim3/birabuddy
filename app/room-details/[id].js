@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   addDoc,
@@ -17,7 +16,6 @@ import {
 } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -29,17 +27,18 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  ActivityIndicator
 } from 'react-native';
 import UserProfile from '../../components/UserProfile';
 import { auth, db } from '../../firebase/firebaseConfig';
 import { useButtonDelay } from '../../hooks/useButtonDelay';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function RoomDetails() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
 
-  // Room details state
   const [room, setRoom] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [joinRequests, setJoinRequests] = useState([]);
@@ -52,13 +51,17 @@ export default function RoomDetails() {
   const [reportedUser, setReportedUser] = useState(null);
   const [reportReason, setReportReason] = useState('');
 
-  // Chat state
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [showChat, setShowChat] = useState(false);
   const flatListRef = useRef(null);
 
-  // Date/Time formatting
+  // Helper: Check if room is full
+  const isRoomFull = useMemo(() => {
+    if (!room) return false;
+    return participants.length >= (room.maxParticipants || 0);
+  }, [participants, room]);
+
   const formatDateString = (dateString) => {
     if (!dateString || typeof dateString !== 'string') return 'Not specified';
     try {
@@ -82,25 +85,15 @@ export default function RoomDetails() {
   const getDisplayLocation = () => {
     if (!room) return 'Not specified';
     if (isParticipant || isCreator) {
-      if (room.barName && room.neighborhood) {
-        return `${room.barName}, ${room.neighborhood}`;
-      } else if (room.fullLocation) {
-        return room.fullLocation;
-      } else if (room.location) {
-        return room.location;
-      }
-      return 'Location details will be shared';
+      if (room.barName && room.neighborhood) return `${room.barName}, ${room.neighborhood}`;
+      if (room.fullLocation) return room.fullLocation;
+      return room.location || 'Location details shared';
     } else {
-      if (room.neighborhood) {
-        return `${room.neighborhood} (exact location shared after joining)`;
-      } else if (room.location) {
-        return `${room.location} area (exact location shared after joining)`;
-      }
+      if (room.neighborhood) return `${room.neighborhood} (exact location hidden)`;
       return 'Location shared after joining';
     }
   };
 
-  // Chat functionality
   useEffect(() => {
     if (!id || !isParticipant || !showChat) return;
     const messagesRef = collection(db, 'rooms', id, 'messages');
@@ -133,31 +126,16 @@ export default function RoomDetails() {
   };
 
   const handleSendPress = () => {
-    executeWithDelay(() => {
-      handleSend();
-    });
+    executeWithDelay(() => handleSend());
   };
 
   const renderChatMessage = ({ item }) => {
     const isMe = item.uid === auth.currentUser.uid;
     return (
-      <View style={[
-        styles.messageContainer,
-        isMe ? styles.myMessage : styles.otherMessage
-      ]}>
-        <View style={[
-          styles.messageBubble,
-          isMe ? styles.myMessageBubble : styles.otherMessageBubble
-        ]}>
-          {!isMe && (
-            <Text style={styles.senderName}>{item.sender}</Text>
-          )}
-          <Text style={[
-            styles.messageText,
-            isMe ? styles.myMessageText : styles.otherMessageText
-          ]}>
-            {item.text}
-          </Text>
+      <View style={[styles.messageContainer, isMe ? styles.myMessage : styles.otherMessage]}>
+        <View style={[styles.messageBubble, isMe ? styles.myMessageBubble : styles.otherMessageBubble]}>
+          {!isMe && <Text style={styles.senderName}>{item.sender}</Text>}
+          <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>{item.text}</Text>
           <Text style={[styles.timestamp, isMe ? styles.myTimestamp : styles.otherTimestamp]}>
             {item.createdAt?.toDate?.().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || ''}
           </Text>
@@ -200,8 +178,6 @@ export default function RoomDetails() {
 
   useEffect(() => {
     if (!id) return;
-    
-    // 1. Listen to Room Document
     const roomRef = doc(db, 'rooms', id);
     const unsubscribeRoom = onSnapshot(roomRef, async (docSnap) => {
       if (!docSnap.exists()) {
@@ -213,43 +189,27 @@ export default function RoomDetails() {
       const roomData = docSnap.data();
       setRoom(roomData);
       
-      // Process Join Requests
       const uids = roomData?.requests || [];
-      const timestamps = roomData?.requestTimestamps || {};
-
       if (uids.length > 0) {
         try {
           const requests = [];
           for (let i = 0; i < uids.length; i++) {
             const uid = uids[i];
-            if (!uid) continue; // Skip invalid UIDs
-
+            if (!uid) continue;
             try {
               const userSnap = await getDoc(doc(db, 'users', uid));
               const nickname = userSnap.exists() ? (userSnap.data().instagram || userSnap.data().nickname) : `User-${uid.substr(0,5)}`;
               const major = userSnap.exists() ? userSnap.data().major : 'Unknown';
-              
-              let requestedAt = new Date();
-              if (timestamps[uid]) {
-                 if (timestamps[uid].toDate) requestedAt = timestamps[uid].toDate();
-                 else if (timestamps[uid].seconds) requestedAt = new Date(timestamps[uid].seconds * 1000);
-              }
-              requests.push({ uid, nickname, major, requestedAt });
-            } catch (e) {
-              console.log('Error fetching request user', e);
-            }
+              requests.push({ uid, nickname, major });
+            } catch (e) {}
           }
-          requests.sort((a, b) => (a.requestedAt?.getTime() || 0) - (b.requestedAt?.getTime() || 0));
           setJoinRequests(requests);
-        } catch (error) {
-          setJoinRequests([]);
-        }
+        } catch (error) { setJoinRequests([]); }
       } else {
         setJoinRequests([]);
       }
     });
 
-    // 2. Listen to Participants Subcollection
     let unsubscribeParticipants;
     if (auth.currentUser?.uid) {
       const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
@@ -257,31 +217,17 @@ export default function RoomDetails() {
         try {
           const list = await Promise.all(snapshot.docs.map(async (docSnap) => {
             const data = docSnap.data();
-            
-            // --- SAFETY CHECK: PREVENT CRASH ON INVALID UID ---
-            if (!data.uid || typeof data.uid !== 'string') {
-              return null; 
-            }
-
+            if (!data.uid) return null;
             try {
               const userDoc = await getDoc(doc(db, 'users', data.uid));
               const userData = userDoc.exists() ? userDoc.data() : {};
-              
               const nickname = userData.instagram || userData.nickname || `User-${data.uid.substr(0,5)}`;
               const major = userData.major || 'Not specified';
-              
               return { uid: data.uid, nickname, major };
-            } catch (e) {
-              return { uid: data.uid, nickname: 'Unknown User', major: '' };
-            }
+            } catch (e) { return { uid: data.uid, nickname: 'Unknown User', major: '' }; }
           }));
-          
-          // Filter out any nulls from invalid UIDs
           setParticipants(list.filter(p => p !== null));
-          
-        } catch (e) {
-          console.error("Error processing participants", e);
-        }
+        } catch (e) {}
       });
     }
 
@@ -300,7 +246,13 @@ export default function RoomDetails() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
           try {
+            // 1. Remove from subcollection
             await deleteDoc(doc(db, 'rooms', id, 'participants', participant.uid));
+            // 2. Remove from Main Array (Syncs with Active Rooms)
+            const roomRef = doc(db, 'rooms', id);
+            await updateDoc(roomRef, {
+                participants: arrayRemove(participant.uid)
+            });
           } catch (e) { Alert.alert('Error', 'Failed to remove participant'); }
         }
       }
@@ -349,7 +301,6 @@ export default function RoomDetails() {
         reportedUserNickname: reportedUser.nickname,
         reporterUserId: auth.currentUser.uid,
         roomId: id,
-        roomName: room.name,
         reason: reportReason,
         createdAt: serverTimestamp(),
         status: 'pending'
@@ -362,7 +313,7 @@ export default function RoomDetails() {
   };
 
   const handleDeleteRoom = async () => {
-    Alert.alert('Delete Room', 'Are you sure? This cannot be undone.', [
+    Alert.alert('Delete Room', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
           try {
@@ -374,13 +325,33 @@ export default function RoomDetails() {
     ]);
   };
 
+  // 👇 THE SAFETY LOCK FOR OVERCROWDING
   const handleApprove = async (requestUser) => {
     if (requestUser.uid === auth.currentUser?.uid) return;
+
+    // 1. Critical Check: Is room full?
+    if (participants.length >= (room.maxParticipants || 0)) {
+        Alert.alert('Room Full', 'This room has reached its capacity.');
+        return;
+    }
+
     const roomRef = doc(db, 'rooms', id);
     const participantDocRef = doc(db, 'rooms', id, 'participants', requestUser.uid);
+    
     try {
-      await setDoc(participantDocRef, { uid: requestUser.uid, nickname: requestUser.nickname, joinedAt: serverTimestamp() });
-      if (room && room.requests) await updateDoc(roomRef, { requests: arrayRemove(requestUser.uid) });
+      // 2. Add to Subcollection
+      await setDoc(participantDocRef, { 
+          uid: requestUser.uid, 
+          nickname: requestUser.nickname, 
+          joinedAt: serverTimestamp() 
+      });
+
+      // 3. Add to Main Array AND remove request
+      await updateDoc(roomRef, { 
+          requests: arrayRemove(requestUser.uid),
+          participants: arrayUnion(requestUser.uid) 
+      });
+
     } catch (e) { Alert.alert('Error', 'Failed to approve'); }
   };
 
@@ -396,7 +367,7 @@ export default function RoomDetails() {
       <SafeAreaView style={styles.loadingContainer}>
         <View style={styles.loadingCard}>
           <ActivityIndicator size="large" color="#E8A4C7" />
-          <Text style={styles.loadingText}>Loading room details...</Text>
+          <Text style={styles.loadingText}>Loading...</Text>
         </View>
       </SafeAreaView>
     );
@@ -629,7 +600,14 @@ export default function RoomDetails() {
                         </View>
                       </View>
                       <View style={styles.requestActions}>
-                        <Pressable style={styles.approveButton} onPress={() => handleApprove(r)}>
+                        <Pressable 
+                            style={[
+                                styles.approveButton, 
+                                isRoomFull && styles.approveButtonDisabled 
+                            ]} 
+                            disabled={isRoomFull}
+                            onPress={() => handleApprove(r)}
+                        >
                           <Ionicons name="checkmark" size={20} color="#fff" />
                         </Pressable>
                         <Pressable style={styles.declineButton} onPress={() => handleDecline(r)}>
@@ -775,6 +753,7 @@ const styles = StyleSheet.create({
   requestMajor: { color: '#666', fontSize: 14 },
   requestActions: { flexDirection: 'row', gap: 8 },
   approveButton: { backgroundColor: '#1C6F75', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  approveButtonDisabled: { backgroundColor: '#999', opacity: 0.6 },
   declineButton: { backgroundColor: '#C62828', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   chatContainer: { flex: 1, backgroundColor: '#4A3B47' },
   chatHeader: { backgroundColor: '#5A4B5C', paddingTop: Platform.OS === 'ios' ? 20 : 10, borderBottomWidth: 1, borderBottomColor: '#7A6B7D' },

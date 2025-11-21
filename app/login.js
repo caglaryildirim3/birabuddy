@@ -13,10 +13,14 @@ export default function Login() {
   const [forgotLoading, setForgotLoading] = useState(false);
   const router = useRouter();
 
-  // ✅ VALIDATION: Accepts ANY email ending in .edu.tr
+  // ✅ VALIDATION: Accepts .edu.tr OR .edu
   const validateEmail = (email) => {
     const emailLower = email.toLowerCase().trim();
-    if (!emailLower.endsWith('.edu.tr')) {
+    
+    const isEduTr = emailLower.endsWith('.edu.tr');
+    const isEdu = emailLower.endsWith('.edu');
+
+    if (!isEduTr && !isEdu) {
       return false;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -32,7 +36,7 @@ export default function Login() {
     }
 
     if (!validateEmail(trimmedEmail)) {
-      Alert.alert('Invalid Email', 'Please enter a valid university email ending in .edu.tr');
+      Alert.alert('Invalid Email', 'Please enter a valid university email ending in .edu.tr or .edu');
       return;
     }
 
@@ -73,7 +77,6 @@ export default function Login() {
       console.log('Resend error:', error);
       let msg = 'Could not send email.';
       
-      // 🔍 DIAGNOSIS MESSAGES
       if (error.code === 'auth/user-not-found') msg = 'No account exists with this email. Please Register first.';
       else if (error.code === 'auth/wrong-password') msg = 'Wrong password.';
       else if (error.code === 'auth/too-many-requests') msg = 'Too many attempts. Please wait a while.';
@@ -93,7 +96,7 @@ export default function Login() {
     }
 
     if (!validateEmail(trimmedEmail)) {
-      Alert.alert('Invalid Email', 'Your email must end with .edu.tr');
+      Alert.alert('Invalid Email', 'Your email must end with .edu.tr or .edu');
       return;
     }
 
@@ -134,7 +137,6 @@ export default function Login() {
       console.log('Login error:', error);
       let msg = 'Login failed.';
       
-      // 🔍 DETAILED ERROR MESSAGES FOR DEBUGGING
       if (error.code === 'auth/user-not-found') {
         msg = 'No account found. Please go to Register.';
       } else if (error.code === 'auth/wrong-password') {
@@ -157,7 +159,7 @@ export default function Login() {
       
       <TextInput
         style={styles.input}
-        placeholder="student email (ending with .edu.tr)"
+        placeholder="student email (.edu or .edu.tr)"
         placeholderTextColor="#aaa"
         value={email}
         onChangeText={setEmail}

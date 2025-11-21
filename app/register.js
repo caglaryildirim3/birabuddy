@@ -400,12 +400,15 @@ Sorularınız, şikayetleriniz veya veri talepleriniz için:
 Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
   `;
 
-  // Updated validation function to accept ANY .edu.tr domain
+  // Updated validation function to accept .edu.tr AND .edu
   const validateEmail = (email) => {
-    const emailLower = email.toLowerCase();
+    const emailLower = email.toLowerCase().trim();
     
-    // Basic check: Must end with .edu.tr
-    if (!emailLower.endsWith('.edu.tr')) {
+    // Allow either .edu.tr OR .edu
+    const isEduTr = emailLower.endsWith('.edu.tr');
+    const isEdu = emailLower.endsWith('.edu');
+
+    if (!isEduTr && !isEdu) {
       return false;
     }
     
@@ -461,7 +464,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
     if (!validateEmail(trimmedEmail)) {
       Alert.alert(
         'Invalid Email',
-        'Please enter a valid university student email ending in .edu.tr'
+        'Please enter a valid university student email (ending in .edu.tr or .edu)'
       );
       return;
     }
@@ -500,15 +503,14 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
       }
 
       // AUTOMATICALLY DETECT UNIVERSITY FROM DOMAIN
-      // Example: ali@metu.edu.tr -> splits to 'metu.edu.tr' -> removes .edu.tr -> 'metu'
       let university = 'University Student';
       try {
-        const domainPart = trimmedEmail.split('@')[1]; // gets 'metu.edu.tr'
+        const domainPart = trimmedEmail.split('@')[1]; 
         if (domainPart) {
-            // Remove common prefixes like 'std', 'mail', 'ogrenci' if they exist
+            // Remove common prefixes
             let cleanDomain = domainPart.replace('std.', '').replace('mail.', '').replace('ogrenci.', '');
-            // Remove .edu.tr
-            let uniName = cleanDomain.replace('.edu.tr', '');
+            // Remove .edu.tr OR .edu
+            let uniName = cleanDomain.replace('.edu.tr', '').replace('.edu', '');
             // Capitalize
             university = uniName.toUpperCase() + ' UNIV.';
         }
@@ -521,7 +523,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           instagram: trimmedInstagramUsername,
           email: trimmedEmail,
-          university: university, // Automatically detected university name
+          university: university,
           emailVerified: false,
           createdAt: new Date(),
           lastLogin: null,
@@ -594,7 +596,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
       
       <TextInput
         style={styles.input}
-        placeholder="student email (ending with .edu.tr)"
+        placeholder="student email (.edu or .edu.tr)"
         placeholderTextColor="#aaa"
         value={email}
         onChangeText={setEmail}

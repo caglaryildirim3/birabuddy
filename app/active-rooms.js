@@ -1,11 +1,9 @@
-import { View, Text, Pressable, StyleSheet, ScrollView, Alert, Dimensions } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
-import { auth } from '../firebase/firebaseConfig';
-import { getUserJoinedRooms, leaveRoom } from '../firebase/roomService';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase/firebaseConfig';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { collection, deleteDoc, doc, getDoc, getDocs } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { auth, db } from '../firebase/firebaseConfig';
 
 const formatDateTimeShort = (dateStr, timeStr) => {
   if (!dateStr || !timeStr) return 'unknown';
@@ -34,43 +32,48 @@ export default function ActiveRooms() {
 
       try {
         setLoading(true);
-        const userRooms = await getUserJoinedRooms(auth.currentUser.uid);
+        
+        // 1. Fetch ALL rooms (It's okay for <500 rooms)
+        const roomsRef = collection(db, 'rooms');
+        const snapshot = await getDocs(roomsRef);
+        const allRooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        const myActiveRooms = [];
         const now = new Date();
-        const filteredRooms = [];
 
-        for (const room of userRooms) {
-          if (!room.date || !room.time) continue;
-          const roomTime = new Date(`${room.date}T${room.time}`);
-          const expiryTime = new Date(roomTime.getTime() + 24 * 60 * 60 * 1000);
+        // 2. Check each room to see if I am a participant
+        for (const room of allRooms) {
+            if (!room.date || !room.time) continue;
+            
+            const roomTime = new Date(`${room.date}T${room.time}`);
+            const expiryTime = new Date(roomTime.getTime() + 24 * 60 * 60 * 1000);
+            
+            if (expiryTime < now) continue; // Skip expired
 
-          if (expiryTime > now) {
-            filteredRooms.push(room);
-          } else {
-            try {
-              await leaveRoom(room.id, auth.currentUser.uid);
-            } catch (err) {}
-          }
+            // CHECK SUBCOLLECTION
+            const participantDoc = await getDoc(doc(db, 'rooms', room.id, 'participants', auth.currentUser.uid));
+            
+            // If I am in the subcollection OR I am the creator
+            if (participantDoc.exists() || room.createdBy === auth.currentUser.uid) {
+                
+                // Get Creator Name
+                let createdByName = 'Unknown User';
+                try {
+                    const creatorDoc = await getDoc(doc(db, 'users', room.createdBy));
+                    if (creatorDoc.exists()) {
+                        const cData = creatorDoc.data();
+                        createdByName = cData.nickname || cData.instagram || 'User';
+                    }
+                } catch (e) {}
+
+                myActiveRooms.push({ ...room, createdByName });
+            }
         }
 
-        const roomsWithCreatorInfo = await Promise.all(
-          filteredRooms.map(async (room) => {
-            try {
-              const creatorDoc = await getDoc(doc(db, 'users', room.createdBy));
-              let createdByName = 'Unknown User';
-              if (creatorDoc.exists()) {
-                const creatorData = creatorDoc.data();
-                createdByName = creatorData.nickname || creatorData.displayName || creatorData.name || `User-${room.createdBy.substring(0, 6)}`;
-              }
-              return { ...room, createdByName };
-            } catch (error) {
-              return { ...room, createdByName: 'Unknown User' };
-            }
-          })
-        );
+        setActiveRooms(myActiveRooms);
 
-        setActiveRooms(roomsWithCreatorInfo);
       } catch (error) {
-        Alert.alert('Error', 'Failed to load rooms.');
+        console.error('Error fetching active rooms:', error);
       } finally {
         setLoading(false);
       }
@@ -90,7 +93,7 @@ export default function ActiveRooms() {
           style: "destructive",
           onPress: async () => {
             try {
-              await leaveRoom(room.id, auth.currentUser.uid);
+              await deleteDoc(doc(db, 'rooms', room.id, 'participants', auth.currentUser.uid));
               setActiveRooms(prevRooms => prevRooms.filter(r => r.id !== room.id));
             } catch (error) {
               Alert.alert('Error', 'Failed to leave room.');
@@ -112,7 +115,7 @@ export default function ActiveRooms() {
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
           </Pressable>
-          <Text style={styles.title}>Active Rooms</Text>
+          <Text style={styles.title}>active rooms</Text>
           <View style={{width: 24}} />
         </View>
         <View style={styles.loadingContainer}>
@@ -140,7 +143,7 @@ export default function ActiveRooms() {
         {activeRooms.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyIcon}>🍺</Text>
-            <Text style={styles.emptyTitle}>No Active Rooms</Text>
+            <Text style={styles.emptyTitle}>no active rooms</Text>
             <Pressable 
               style={styles.browseButton}
               onPress={() => router.push('/room-list')}
@@ -158,7 +161,6 @@ export default function ActiveRooms() {
               <View style={styles.cardLeft}>
                 <Text style={styles.cardTitle} numberOfLines={1}>{room.name}</Text>
                 
-                {/* DESCRIPTION ADDED */}
                 {room.description ? (
                   <Text style={styles.description} numberOfLines={1}>{room.description}</Text>
                 ) : null}
@@ -177,7 +179,7 @@ export default function ActiveRooms() {
                 <View style={styles.countContainer}>
                   <Ionicons name="people" size={16} color="#3A6A6F" />
                   <Text style={styles.peopleCount}>
-                    {room.participants?.length || 0}/{room.maxParticipants}
+                     {room.maxParticipants} max
                   </Text>
                 </View>
 
@@ -296,6 +298,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 12,
   },
+  
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',

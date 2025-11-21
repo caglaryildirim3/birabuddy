@@ -1,10 +1,10 @@
-import { View, Text, Pressable, StyleSheet, Image, Alert, Dimensions, ScrollView, SafeAreaView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
-import { auth } from '../firebase/firebaseConfig';
-import { useState, useEffect } from 'react';
-import { Ionicons } from '@expo/vector-icons';
+import { useEffect, useState } from 'react';
+import { Alert, Dimensions, Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import CheersImage from '../assets/cheers.png';
+import { auth } from '../firebase/firebaseConfig';
 
 const { width, height } = Dimensions.get('window');
 const GAP = 20; // Increased gap for better separation

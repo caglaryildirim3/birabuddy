@@ -37,6 +37,7 @@ export default function JoinRoom() {
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
 
+  // --- FILTERS ---
   const [activeName, setActiveName] = useState('');
   const [activeLocations, setActiveLocations] = useState([]); 
   const [activeDay, setActiveDay] = useState(null);
@@ -167,7 +168,9 @@ export default function JoinRoom() {
             const participantsRef = collection(db, 'rooms', room.id, 'participants');
             const participantUnsub = onSnapshot(participantsRef, (participantSnapshot) => {
               const participants = participantSnapshot.docs.map(doc => doc.data());
-              const isUserParticipant = participants.some(p => p.userId === user.uid);
+              
+              // 👇 FIXED: Changed p.userId to p.uid (Critical Fix)
+              const isUserParticipant = participants.some(p => p.uid === user.uid);
 
               setParticipantCounts((prev) => ({
                 ...prev,
@@ -250,7 +253,7 @@ export default function JoinRoom() {
         requests: arrayUnion(currentUser.uid),
         requestTimestamps: { [currentUser.uid]: serverTimestamp() }
       });
-  
+      
     } catch (error) {
       Alert.alert('Error', error.message);
     }
@@ -268,7 +271,6 @@ export default function JoinRoom() {
         <View style={styles.cardLeft}>
           <Text style={styles.title} numberOfLines={1}>{item.name}</Text>
           
-          {/* DESCRIPTION ADDED HERE */}
           {item.description ? (
             <Text style={styles.description} numberOfLines={1}>{item.description}</Text>
           ) : null}
@@ -471,22 +473,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     backgroundColor: '#4A3B47',
   },
-  backButton: {
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#E8A4C7',
-  },
-  filterIconBtn: {
-    padding: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 8,
-  },
-  flatListContent: {
-    paddingBottom: 100,
-  },
+  backButton: { padding: 4 },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#E8A4C7' },
+  filterIconBtn: { padding: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 8 },
+  flatListContent: { paddingBottom: 100 },
   card: {
     backgroundColor: '#E8D5DA',
     marginHorizontal: 20, 
@@ -503,182 +493,36 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
-  cardLeft: {
-    flex: 1, 
-    marginRight: 10,
-  },
-  cardRight: {
-    alignItems: 'flex-end', 
-    justifyContent: 'space-between',
-    minWidth: 70,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4d4c41',
-    marginBottom: 2,
-  },
-  description: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 6,
-    fontStyle: 'italic',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  location: {
-    fontSize: 13,
-    color: '#4d4c41',
-    marginLeft: 4,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  time: {
-    fontSize: 13,
-    color: '#666',
-    marginLeft: 4,
-  },
-  countContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  peopleCount: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#3A6A6F',
-    marginLeft: 4,
-  },
-  joinButton: {
-    backgroundColor: '#E1B604',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-  },
-  joinButtonText: {
-    color: '#1C6F75',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  requestedBadge: {
-    backgroundColor: '#DCD8A7',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 20,
-  },
-  requestedText: {
-    fontSize: 11,
-    color: '#555',
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: '#E8A4C7',
-    fontSize: 16,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#E8D5DA',
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    padding: 20,
-    height: '85%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#4A3B47',
-  },
-  filterLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#4A3B47',
-    marginTop: 15,
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    color: '#333',
-  },
-  chipScroll: {
-    flexDirection: 'row',
-    marginBottom: 5,
-  },
-  wrapContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  chip: {
-    backgroundColor: '#FFF',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#E1B604',
-  },
-  chipActive: {
-    backgroundColor: '#E1B604',
-  },
-  chipText: {
-    color: '#4A3B47',
-    fontSize: 12,
-    textTransform: 'capitalize',
-  },
-  chipTextActive: {
-    color: '#FFF',
-    fontWeight: 'bold',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 20,
-    marginBottom: 20,
-  },
-  clearButton: {
-    flex: 0.3,
-    padding: 15,
-    borderRadius: 12,
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#4A3B47',
-  },
-  clearButtonText: {
-    color: '#4A3B47',
-    fontWeight: 'bold',
-  },
-  applyButton: {
-    flex: 0.65,
-    backgroundColor: '#4A3B47',
-    padding: 15,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  applyButtonText: {
-    color: '#E1B604',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  cardLeft: { flex: 1, marginRight: 10 },
+  cardRight: { alignItems: 'flex-end', justifyContent: 'space-between', minWidth: 70 },
+  title: { fontSize: 18, fontWeight: 'bold', color: '#4d4c41', marginBottom: 2 },
+  description: { fontSize: 13, color: '#666', marginBottom: 6, fontStyle: 'italic' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  location: { fontSize: 13, color: '#4d4c41', marginLeft: 4, fontWeight: '600', textTransform: 'capitalize' },
+  time: { fontSize: 13, color: '#666', marginLeft: 4 },
+  countContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  peopleCount: { fontSize: 14, fontWeight: 'bold', color: '#3A6A6F', marginLeft: 4 },
+  joinButton: { backgroundColor: '#E1B604', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20 },
+  joinButtonText: { color: '#1C6F75', fontWeight: 'bold', fontSize: 12 },
+  requestedBadge: { backgroundColor: '#DCD8A7', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20 },
+  requestedText: { fontSize: 11, color: '#555', fontWeight: '600' },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { color: '#E8A4C7', fontSize: 16 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#E8D5DA', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, height: '85%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#4A3B47' },
+  filterLabel: { fontSize: 15, fontWeight: '700', color: '#4A3B47', marginTop: 15, marginBottom: 8 },
+  input: { backgroundColor: '#FFF', borderRadius: 8, padding: 12, fontSize: 14, color: '#333' },
+  chipScroll: { flexDirection: 'row', marginBottom: 5 },
+  wrapContainer: { flexDirection: 'row', flexWrap: 'wrap' },
+  chip: { backgroundColor: '#FFF', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E1B604' },
+  chipActive: { backgroundColor: '#E1B604' },
+  chipText: { color: '#4A3B47', fontSize: 12, textTransform: 'capitalize' },
+  chipTextActive: { color: '#FFF', fontWeight: 'bold' },
+  modalFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, marginBottom: 20 },
+  clearButton: { flex: 0.3, padding: 15, borderRadius: 12, alignItems: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: '#4A3B47' },
+  clearButtonText: { color: '#4A3B47', fontWeight: 'bold' },
+  applyButton: { flex: 0.65, backgroundColor: '#4A3B47', padding: 15, borderRadius: 12, alignItems: 'center' },
+  applyButtonText: { color: '#E1B604', fontSize: 16, fontWeight: 'bold' },
 });
