@@ -1,12 +1,15 @@
-import { View, Text, Pressable, StyleSheet, Image, Alert, Dimensions, ScrollView } from 'react-native';
-import { Link } from 'expo-router';
-import CheersImage from '../assets/cheers.png';
+import { View, Text, Pressable, StyleSheet, Image, Alert, Dimensions, ScrollView, SafeAreaView } from 'react-native';
+import { Link, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase/firebaseConfig';
-import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import CheersImage from '../assets/cheers.png';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+const GAP = 20; // Increased gap for better separation
+const PADDING = 24;
+const BUTTON_WIDTH = (width - (PADDING * 2) - GAP) / 2; 
 
 export default function Home() {
   const router = useRouter();
@@ -14,22 +17,15 @@ export default function Home() {
   const [notifications, setNotifications] = useState([]); 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  // Fetch user's joined rooms from Firebase
   useEffect(() => {
-    // TODO: Replace with real Firebase query to get user's joined rooms
-    // For now, showing empty array - only real joined rooms should appear
     const fetchUserRooms = async () => {
       try {
-        // Example Firebase query (implement this):
-        // const userRooms = await getUserJoinedRooms(auth.currentUser.uid);
-        // setActiveRooms(userRooms);
-        setActiveRooms([]); // Empty until you implement Firebase query
+        setActiveRooms([]); 
       } catch (error) {
-        console.error('Failed to load your rooms. Please try again later.', error);
+        console.error('Failed to load your rooms', error);
         setActiveRooms([]);
       }
     };
-    
     fetchUserRooms();
   }, []);
 
@@ -38,10 +34,7 @@ export default function Home() {
       "Sign Out",
       "Are you sure you want to sign out?",
       [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Sign Out",
           style: "destructive",
@@ -50,8 +43,7 @@ export default function Home() {
               await signOut(auth);
               router.replace('/login');
             } catch (error) {
-              console.error('Sign-out error:', error.message);
-              Alert.alert('Error', 'Failed to sign out. Please try again.');
+              Alert.alert('Error', 'Failed to sign out.');
             }
           }
         }
@@ -59,35 +51,43 @@ export default function Home() {
     );
   };
 
-const handleActiveRooms = () => {
-  router.push('/active-rooms');
-};
+  const handleActiveRooms = () => {
+    router.push('/active-rooms');
+  };
 
   return (
-    <View style={styles.container}>
-      {/* Notifications Button */}
-      <Link href="/notifications" asChild>
-        <Pressable style={styles.notificationButton}>
-          <Text style={styles.notificationIcon}>🔔</Text>
-          {notifications > 0 && (
-            <View style={styles.notificationBadge}>
-              <Text style={styles.notificationBadgeText}>{notifications}</Text>
-            </View>
-          )}
+    <SafeAreaView style={styles.container}>
+      {/* TOP BAR */}
+      <View style={styles.topBar}>
+        <Pressable style={styles.iconButton} onPress={handleSignOut}>
+          <Ionicons name="log-out-outline" size={24} color="#E8A4C7" />
         </Pressable>
-      </Link>
 
+        <Link href="/notifications" asChild>
+          <Pressable style={styles.iconButton}>
+            <Ionicons name="notifications-outline" size={24} color="#E8A4C7" />
+            {unreadCount > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>{unreadCount}</Text>
+              </View>
+            )}
+          </Pressable>
+        </Link>
+      </View>
+
+      {/* MAIN CONTENT */}
       <ScrollView 
         style={styles.scrollView} 
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
+        {/* 1. HEADER SECTION */}
+        <View style={styles.headerSection}>
           <Text style={styles.title}>birabuddy</Text>
           <Text style={styles.subtitle}>have fun, be casual</Text>
         </View>
 
-        {/* Active Rooms Section */}
+        {/* 2. DYNAMIC CONTENT (Active Rooms) */}
         {activeRooms.length > 0 && (
           <View style={styles.activeRoomsSection}>
             <Text style={styles.sectionTitle}>your active rooms</Text>
@@ -100,50 +100,60 @@ const handleActiveRooms = () => {
           </View>
         )}
 
-        <View style={styles.menuContainer}>
-          <Link href="/create-room" asChild>
-            <Pressable style={styles.button}>
-              <Text style={styles.buttonText}>create a room</Text>
-            </Pressable>
-          </Link>
+        {/* 3. GRID MENU SECTION */}
+        <View style={styles.gridSection}>
+          <View style={styles.gridRow}>
+            <Link href="/create-room" asChild>
+              <Pressable style={styles.gridButton}>
+                <View style={styles.iconCircle}>
+                  <Ionicons name="add" size={32} color="#4A3B47" />
+                </View>
+                <Text style={styles.gridButtonText}>create a room</Text>
+              </Pressable>
+            </Link>
 
-          <Link href="/room-list" asChild>
-            <Pressable style={styles.button}>
-              <Text style={styles.buttonText}>join a room</Text>
-            </Pressable>
-          </Link>
+            <Link href="/room-list" asChild>
+              <Pressable style={styles.gridButton}>
+                <View style={styles.iconCircle}>
+                  <Ionicons name="search" size={28} color="#4A3B47" />
+                </View>
+                <Text style={styles.gridButtonText}>join a room</Text>
+              </Pressable>
+            </Link>
+          </View>
 
-          <Link href="/my-rooms" asChild>
-            <Pressable style={styles.button}>
-              <Text style={styles.buttonText}>my rooms</Text>
-            </Pressable>
-          </Link>
+          <View style={styles.gridRow}>
+            <Link href="/my-rooms" asChild>
+              <Pressable style={styles.gridButton}>
+                <View style={styles.iconCircle}>
+                  <Ionicons name="home" size={28} color="#4A3B47" />
+                </View>
+                <Text style={styles.gridButtonText}>my rooms</Text>
+              </Pressable>
+            </Link>
 
-          <Pressable style={styles.button} onPress={handleActiveRooms}>
-            <Text style={styles.buttonText}>active rooms</Text>
-          </Pressable>
-
-          <Link href="/my-profile" asChild>
-            <Pressable style={styles.button}>
-              <Text style={styles.buttonText}>my profile</Text>
+            <Pressable style={styles.gridButton} onPress={handleActiveRooms}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="beer" size={28} color="#4A3B47" />
+              </View>
+              <Text style={styles.gridButtonText}>active rooms</Text>
             </Pressable>
-          </Link>
+          </View>
         </View>
 
-        <Image source={CheersImage} style={styles.cheers} />
+        {/* 4. FOOTER SECTION */}
+        <View style={styles.footerSection}>
+          <Image source={CheersImage} style={styles.cheers} />
+        </View>
       </ScrollView>
 
-      {/* Sign out button */}
-      <Pressable 
-        style={({ pressed }) => [
-          styles.signOutButton,
-          pressed && styles.signOutButtonPressed
-        ]} 
-        onPress={handleSignOut}
-      >
-        <Text style={styles.signOutText}>sign out</Text>
-      </Pressable>
-    </View>
+      {/* FAB */}
+      <Link href="/my-profile" asChild>
+        <Pressable style={styles.fab}>
+          <Ionicons name="person" size={32} color="#4A3B47" />
+        </Pressable>
+      </Link>
+    </SafeAreaView>
   );
 }
 
@@ -152,152 +162,171 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#4A3B47',
   },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    justifyContent: 'center',
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 24,
-    paddingTop: 60, // Space for notification button
-  },
-  notificationButton: {
-    position: 'absolute',
-    top: 16,
-    right: 0,
-    backgroundColor: '#4A3B47',
-    padding: 10,
-    borderRadius: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
     zIndex: 10,
-    elevation: 3,
-    shadowColor: '#4A3B47',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
   },
-  notificationIcon: {
-    fontSize: 16,
-    color: '#20696eff',
+  iconButton: {
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
   },
   notificationBadge: {
     position: 'absolute',
-    top: -4,
-    right: -4,
+    top: -2,
+    right: -2,
     backgroundColor: '#D32F2F',
     borderRadius: 8,
     minWidth: 16,
     height: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#4A3B47',
   },
   notificationBadgeText: {
     color: '#fff',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: 'bold',
   },
-  header: {
+  
+  // SCROLL VIEW LAYOUT
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1, // Ensures content fills screen height
+    justifyContent: 'space-between', // Distributes sections evenly!
+    paddingHorizontal: PADDING,
+    paddingBottom: 40, 
+  },
+
+  // 1. HEADER
+  headerSection: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginTop: 20, 
+    marginBottom: 20,
   },
   title: {
-    fontSize: 45,
-    fontWeight: '600',
+    fontSize: 46,
+    fontWeight: 'bold',
     color: '#E8A4C7',
-    fontFamily: 'Courier New', // Simple, clean system font
-    textAlign: 'center',
-    letterSpacing: 1,
+    marginBottom: 5,
   },
   subtitle: {
     fontSize: 16,
-    fontWeight: '300',
+    fontWeight: '400',
     color: '#E8D5DA',
-    marginTop: 20,
+    opacity: 0.7,
     fontStyle: 'italic',
   },
+
+  // 2. ACTIVE ROOMS
   activeRoomsSection: {
     width: '100%',
-    marginBottom: 30,
+    marginBottom: 20,
     alignItems: 'center',
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: '#DCD8A7',
-    marginBottom: 15,
-    textAlign: 'center',
+    marginBottom: 12,
   },
   activeRoomCard: {
-    backgroundColor: 'rgba(225, 182, 4, 0.9)',
+    backgroundColor: '#3A6A6F',
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
     marginBottom: 10,
-    width: Math.min(width * 0.85, 320),
+    width: '100%',
     alignItems: 'center',
   },
   roomName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1C6F75',
+    color: '#E8D5DA',
     marginBottom: 4,
   },
   roomDetails: {
     fontSize: 14,
-    color: '#1C6F75',
+    color: '#E8D5DA',
     opacity: 0.8,
   },
-  menuContainer: {
+
+  // 3. GRID MENU
+  gridSection: {
     width: '100%',
-    alignItems: 'center',
+    gap: GAP,
+    marginVertical: 20, // Breathing room from header/footer
   },
-  button: {
+  gridRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  gridButton: {
+    width: BUTTON_WIDTH,
+    height: BUTTON_WIDTH, // Perfect Square
     backgroundColor: '#E8D5DA',
-    paddingVertical: 22,
-    paddingHorizontal: 32,
-    borderRadius: 16,
-    marginBottom: 16,
-    width: Math.min(width * 0.8, 280),
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 3,
+    // Soft Shadow
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  buttonText: {
-    color: '#104245ff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(74, 59, 71, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  gridButtonText: {
+    color: '#4A3B47',
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+
+  // 4. FOOTER
+  footerSection: {
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginBottom: 40, // Push slightly up from very bottom
   },
   cheers: {
-    width: 80,
-    height: 60,
-    marginTop: 15,
-    marginBottom: 80, // Space for sign out button
+    width: 100,
+    height: 80,
     resizeMode: 'contain',
     opacity: 0.8,
   },
-  signOutButton: {
+
+  // FAB
+  fab: {
     position: 'absolute',
-    bottom: 40,
-    right: 24,
-    backgroundColor: '#D32F2F',
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    elevation: 5,
+    bottom: 30,
+    right: 30,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#E8A4C7',
+    alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  signOutButtonPressed: {
-    backgroundColor: '#B71C1C',
-    transform: [{ scale: 0.95 }],
-  },
-  signOutText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
+    shadowRadius: 5,
+    elevation: 8,
+    borderWidth: 3,
+    borderColor: '#4A3B47',
   },
 });

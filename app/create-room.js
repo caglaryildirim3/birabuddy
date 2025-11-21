@@ -31,23 +31,18 @@ export default function CreateRoom() {
 
   const router = useRouter();
   
-  // 5 second delay for room creation
   const { isDisabled, executeWithDelay } = useButtonDelay(5000);
 
-  // Character limits
   const NAME_LIMIT = 50;
   const DESCRIPTION_LIMIT = 200;
   const BAR_NAME_LIMIT = 50;
 
-  // Neighborhoods list
   const neighborhoods = ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'];
 
-  // Get date limits - today and 7 days ahead
   const today = new Date();
   const maxDate = new Date();
   maxDate.setDate(today.getDate() + 7);
 
-  // Generate array of next 7 days with day names
   const getNext7Days = () => {
     const days = [];
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -70,7 +65,6 @@ export default function CreateRoom() {
   const next7Days = getNext7Days();
 
   const handleCreateRoom = async () => {
-    // Enhanced validation with character limits
     if (!name.trim()) {
       Alert.alert('Missing Field', 'Room name is required.');
       return;
@@ -106,7 +100,6 @@ export default function CreateRoom() {
       return;
     }
 
-    // Combine selected date and time into one Date object
     const now = new Date();
     const roomDateTime = new Date(
       selectedDate.getFullYear(),
@@ -124,11 +117,10 @@ export default function CreateRoom() {
       return;
     }
 
-    // Check if date is more than 7 days ahead (shouldn't happen with buttons, but safety check)
     if (selectedDate > maxDate) {
       Alert.alert(
         'Date Too Far Ahead',
-        'You can only create rooms for the next 7 days. We aim for casual meetups! 🍻'
+        'You can only create rooms for the next 7 days.'
       );
       return;
     }
@@ -139,7 +131,6 @@ export default function CreateRoom() {
       return;
     }
 
-    // Fixed date formatting to avoid timezone issues
     const formattedDate = selectedDate.getFullYear() + '-' + 
       String(selectedDate.getMonth() + 1).padStart(2, '0') + '-' + 
       String(selectedDate.getDate()).padStart(2, '0');
@@ -153,7 +144,6 @@ export default function CreateRoom() {
         description: description.trim(),
         neighborhood: neighborhood,
         barName: barName.trim(),
-        // Keep the full location for participants only
         fullLocation: `${barName.trim()}, ${neighborhood}`,
         date: formattedDate,
         time: formattedTime,
@@ -173,7 +163,10 @@ export default function CreateRoom() {
       });
 
       Alert.alert('Room Created', 'Your room was successfully created.');
-      router.push('/my-rooms');
+      
+      // 👇 FIXED: Used replace instead of push
+      router.replace('/my-rooms');
+      
     } catch (error) {
       console.error('Error creating room:', error);
       Alert.alert('Error', error.message);
@@ -212,7 +205,6 @@ export default function CreateRoom() {
     setShowTimePicker(!showTimePicker);
   };
 
-  // Format date for display (DD.MM.YYYY format)
   const formatDateForDisplay = (date) => {
     const day = String(date.getDate()).padStart(2, '0');
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -220,7 +212,6 @@ export default function CreateRoom() {
     return `${day}.${month}.${year}`;
   };
 
-  // Format time for display (HH:MM format)
   const formatTimeForDisplay = (time) => {
     const hours = String(time.getHours()).padStart(2, '0');
     const minutes = String(time.getMinutes()).padStart(2, '0');
@@ -236,7 +227,6 @@ export default function CreateRoom() {
         <Text style={styles.title}>🍺 create a room</Text>
         <Text style={styles.subtitle}>feel free!</Text>
         
-        {/* Room Name with character counter */}
         <View style={styles.inputContainer}>
           <TextInput
             style={[
@@ -247,7 +237,7 @@ export default function CreateRoom() {
             placeholderTextColor="#999"
             value={name}
             onChangeText={setName}
-            maxLength={NAME_LIMIT + 10} // Allow typing a bit over to show error
+            maxLength={NAME_LIMIT + 10} 
           />
           <Text style={[
             styles.characterCount,
@@ -257,7 +247,6 @@ export default function CreateRoom() {
           </Text>
         </View>
 
-        {/* Description with character counter */}
         <View style={styles.inputContainer}>
           <TextInput
             style={[
@@ -272,7 +261,7 @@ export default function CreateRoom() {
             multiline={true}
             numberOfLines={3}
             textAlignVertical="top"
-            maxLength={DESCRIPTION_LIMIT + 10} // Allow typing a bit over to show error
+            maxLength={DESCRIPTION_LIMIT + 10} 
           />
           <Text style={[
             styles.characterCount,
@@ -282,10 +271,8 @@ export default function CreateRoom() {
           </Text>
         </View>
 
-        {/* Location Section - Neighborhood + Bar Name */}
         <Text style={styles.sectionTitle}>📍 Where to meet?</Text>
         
-        {/* Neighborhood Selection */}
         <View style={styles.inputContainer}>
           <Text style={styles.fieldLabel}>neighborhood:</Text>
           <ScrollView 
@@ -313,7 +300,6 @@ export default function CreateRoom() {
           </ScrollView>
         </View>
 
-        {/* Bar Name */}
         <View style={styles.inputContainer}>
           <Text style={styles.fieldLabel}>bar name:</Text>
           <TextInput
@@ -335,7 +321,6 @@ export default function CreateRoom() {
           </Text>
         </View>
 
-        {/* Date Selection with 7 Day Buttons */}
         <View style={styles.dateContainer}>
           <Text style={styles.sectionTitle}>📅 Pick a day (next 7 days only!)</Text>
           <ScrollView 
@@ -375,10 +360,9 @@ export default function CreateRoom() {
           </ScrollView>
         </View>
 
-        {/* Time Picker */}
         <Pressable onPress={toggleTimePicker} style={styles.input}>
           <Text style={styles.dateText}>
-            🕐 {formatTimeForDisplay(selectedTime)}
+            ⏰ {formatTimeForDisplay(selectedTime)}
           </Text>
         </Pressable>
         
@@ -413,7 +397,7 @@ export default function CreateRoom() {
             styles.buttonText,
             isDisabled && styles.buttonTextDisabled
           ]}>
-            {isDisabled ? '⏳ creating room...' : '🍻 create room'}
+            {isDisabled ? '⏳ creating room...' : '✨ create room'}
           </Text>
         </Pressable>
 
@@ -445,7 +429,6 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     opacity: 0.8,
   },
-  // New container for input + character counter
   inputContainer: {
     marginBottom: 16,
   },
@@ -463,16 +446,13 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  // Error state for inputs
   inputError: {
     borderColor: '#E74C3C',
     borderWidth: 3,
   },
-  // Text area specific styling
   textArea: {
     minHeight: 80,
   },
-  // Character counter styles
   characterCount: {
     color: '#E8D5DA',
     fontSize: 12,
@@ -485,7 +465,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     opacity: 1,
   },
-  // Section title style
   sectionTitle: {
     color: '#E8A4C7',
     fontSize: 16,
@@ -493,14 +472,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: 'center',
   },
-  // Field label style
   fieldLabel: {
     color: '#E8A4C7',
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 8,
   },
-  // Neighborhood selection styles
   neighborhoodContainer: {
     flexDirection: 'row',
     paddingHorizontal: 4,
@@ -528,16 +505,13 @@ const styles = StyleSheet.create({
     color: '#4A3B47',
     fontWeight: 'bold',
   },
-  // Date container for date picker + hint
   dateContainer: {
     marginBottom: 20,
   },
-  // Date buttons container
   dateButtonsContainer: {
     paddingHorizontal: 4,
     gap: 8,
   },
-  // Individual day button
   dayButton: {
     backgroundColor: '#5A4B5C',
     borderRadius: 12,
@@ -548,17 +522,14 @@ const styles = StyleSheet.create({
     borderColor: '#7A6B7D',
     minWidth: 70,
   },
-  // Selected day button
   dayButtonSelected: {
     backgroundColor: '#E8A4C7',
     borderColor: '#E8A4C7',
   },
-  // Today button special styling
   todayButton: {
     borderColor: '#FFD700',
     borderWidth: 3,
   },
-  // Day name text (tue, wed, etc.)
   dayButtonText: {
     color: '#E8D5DA',
     fontSize: 14,
@@ -573,7 +544,6 @@ const styles = StyleSheet.create({
     color: '#FFD700',
     fontWeight: 'bold',
   },
-  // Date text (15/8)
   dateButtonText: {
     color: '#E8D5DA',
     fontSize: 12,
@@ -590,7 +560,6 @@ const styles = StyleSheet.create({
     opacity: 1,
     fontWeight: '600',
   },
-  // "Today" label
   todayLabel: {
     color: '#FFD700',
     fontSize: 10,
@@ -608,6 +577,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 20,
+    marginBottom: 40, // Added extra margin at bottom for scrolling
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
