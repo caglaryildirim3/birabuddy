@@ -1,22 +1,21 @@
-import { Stack, useRouter, usePathname } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../firebase/firebaseConfig';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import type { User } from 'firebase/auth';
-import { View, ActivityIndicator } from 'react-native';
+import { onAuthStateChanged } from 'firebase/auth';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { auth } from '../firebase/firebaseConfig';
 
 export default function Layout() {
   const router = useRouter();
   const pathname = usePathname();
   const [loading, setLoading] = useState(true);
-const [user, setUser] = useState<User | null>(null);
-
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: User | null) => {
-  setUser(firebaseUser);
-  setLoading(false);
-});
+      setUser(firebaseUser);
+      setLoading(false);
+    });
 
     return () => unsubscribe();
   }, []);
@@ -33,8 +32,9 @@ const [user, setUser] = useState<User | null>(null);
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#121212', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#fff" />
+      // Updated loading screen to match your Pink/Purple theme
+      <View style={{ flex: 1, backgroundColor: '#4A3B47', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#E8A4C7" />
       </View>
     );
   }
@@ -42,9 +42,9 @@ const [user, setUser] = useState<User | null>(null);
   return (
     <Stack
       screenOptions={{
-        headerStyle: { backgroundColor: '#121212' },
-        headerTintColor: '#fff',
-        contentStyle: { backgroundColor: '#121212' },
+        headerShown: false, // 👈 THIS removes the black border/header
+        contentStyle: { backgroundColor: '#4A3B47' }, // 👈 Matches your app theme
+        animation: 'fade', // Optional: Makes screen transitions smoother
       }}
     />
   );
