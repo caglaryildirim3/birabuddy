@@ -13,10 +13,23 @@ export default function MyRooms() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  const formatDateTimeShort = (dateStr, timeStr) => {
-    if (!dateStr || !timeStr) return 'unknown';
-    const date = new Date(`${dateStr}T${timeStr}`);
-    return date.toLocaleString('en-US', {
+ const formatDateTimeShort = (dateVal, timeStr) => {
+    if (!dateVal) return 'unknown';
+    
+    let dateObj;
+
+    // 1. Handle New Data (Firestore Timestamp)
+    if (dateVal.toDate) {
+      dateObj = dateVal.toDate();
+    } 
+    // 2. Handle Old Data (String)
+    else if (typeof dateVal === 'string' && timeStr) {
+      dateObj = new Date(`${dateVal}T${timeStr}`);
+    } else {
+      return 'unknown';
+    }
+
+    return dateObj.toLocaleString('en-US', {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
@@ -49,16 +62,39 @@ export default function MyRooms() {
           const validRooms = [];
 
           for (const room of fetched) {
-            if (!room.date || !room.time) continue;
-            try {
-              const eventDateTime = new Date(`${room.date}T${room.time}`);
-              const expiryDateTime = new Date(eventDateTime.getTime() + 24 * 60 * 60 * 1000);
-              if (expiryDateTime < now) {
-                await deleteDoc(doc(db, 'rooms', room.id));
+            const { date, time } = room;
+            
+            // Safety check
+            if (!date) continue;
+
+            let eventDateTime;
+
+            // --- DATA TYPE CHECK START ---
+            if (date.toDate) {
+                // New Data (Timestamp)
+                eventDateTime = date.toDate();
+            } else if (typeof date === 'string' && time) {
+                // Old Data (String)
+                eventDateTime = new Date(`${date}T${time}`);
+            } else {
                 continue;
+            }
+            // --- DATA TYPE CHECK END ---
+
+            // Check 24-hour expiration
+            const expiryDateTime = new Date(eventDateTime.getTime() + 24 * 60 * 60 * 1000);
+            
+            if (expiryDateTime < now) {
+              // It's expired -> Delete from database
+              try {
+                await deleteDoc(doc(db, 'rooms', room.id));
+              } catch (e) {
+                console.error("Error deleting expired room:", e);
               }
-              validRooms.push(room);
-            } catch (e) { continue; }
+              continue; // Don't show in list
+            }
+            
+            validRooms.push(room);
           }
 
           const sortedRooms = validRooms.sort((a, b) => {
@@ -69,6 +105,7 @@ export default function MyRooms() {
           setMyRooms(sortedRooms);
           setLoading(false);
 
+          // (Keep the rest of your participant listener logic exactly the same)
           sortedRooms.forEach((room) => {
             const participantsRef = collection(db, 'rooms', room.id, 'participants');
             const sub = onSnapshot(participantsRef, (snap) => {

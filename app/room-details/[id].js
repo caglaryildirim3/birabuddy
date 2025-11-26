@@ -28,7 +28,9 @@ import {
   Text,
   TextInput,
   View,
-  ActivityIndicator
+  ActivityIndicator,
+  Keyboard,
+  TouchableWithoutFeedback
 } from 'react-native';
 import UserProfile from '../../components/UserProfile';
 import { auth, db } from '../../firebase/firebaseConfig';
@@ -62,19 +64,35 @@ export default function RoomDetails() {
     return participants.length >= (room.maxParticipants || 0);
   }, [participants, room]);
 
-  const formatDateString = (dateString) => {
-    if (!dateString || typeof dateString !== 'string') return 'Not specified';
-    try {
-      const [year, month, day] = dateString.split('-');
-      const date = new Date(year, month - 1, day);
-      return date.toLocaleDateString('tr-TR', {
+const formatDateString = (dateVal) => {
+    if (!dateVal) return 'Not specified';
+
+    // 1. Handle New Data (Firestore Timestamp)
+    if (dateVal.toDate) {
+      // Use Turkish locale 'tr-TR' as per your original code
+      return dateVal.toDate().toLocaleDateString('tr-TR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
       });
-    } catch (error) {
-      return dateString;
     }
+
+    // 2. Handle Old Data (String like "2025-11-26")
+    if (typeof dateVal === 'string') {
+      try {
+        const [year, month, day] = dateVal.split('-');
+        const date = new Date(year, month - 1, day);
+        return date.toLocaleDateString('tr-TR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        });
+      } catch (error) {
+        return dateVal;
+      }
+    }
+
+    return 'Not specified';
   };
 
   const formatTimeString = (timeString) => {
@@ -186,22 +204,61 @@ export default function RoomDetails() {
         ]);
         return;
       }
+      
       const roomData = docSnap.data();
+
+      // --- START: 24h Expiration Check ---
+      const now = new Date();
+      const { date, time } = roomData;
+      
+      if (date) {
+         let startDateTime;
+         
+         // A. Detect Data Type
+         if (date.toDate) {
+             startDateTime = date.toDate();
+         } else if (typeof date === 'string' && time) {
+             startDateTime = new Date(`${date}T${time}`);
+         }
+         
+         // B. Check Expiration
+         if (startDateTime) {
+             const expiry = new Date(startDateTime.getTime() + 24 * 60 * 60 * 1000);
+             
+             if (expiry < now) {
+                 // If expired, alert and leave
+                 Alert.alert('Room Expired', 'This meetup has ended.', [
+                     { text: 'OK', onPress: () => router.replace('/my-rooms') }
+                 ]);
+                 
+                 // If I am the host, clean it up from database
+                 if (roomData.createdBy === auth.currentUser?.uid) {
+                     deleteDoc(roomRef).catch(err => console.log('Auto-delete failed', err));
+                 }
+                 return; 
+             }
+         }
+      }
+      // --- END: Expiration Check ---
+
       setRoom(roomData);
       
+      // ... (Rest of your existing logic for fetching requests below) ...
       const uids = roomData?.requests || [];
       if (uids.length > 0) {
+        // ... (Keep existing request fetching logic) ...
         try {
           const requests = [];
           for (let i = 0; i < uids.length; i++) {
-            const uid = uids[i];
-            if (!uid) continue;
-            try {
-              const userSnap = await getDoc(doc(db, 'users', uid));
-              const nickname = userSnap.exists() ? (userSnap.data().instagram || userSnap.data().nickname) : `User-${uid.substr(0,5)}`;
-              const major = userSnap.exists() ? userSnap.data().major : 'Unknown';
-              requests.push({ uid, nickname, major });
-            } catch (e) {}
+             // ... (Keep existing loop) ...
+             const uid = uids[i];
+             if (!uid) continue;
+             try {
+                const userSnap = await getDoc(doc(db, 'users', uid));
+                const nickname = userSnap.exists() ? (userSnap.data().instagram || userSnap.data().nickname) : `User-${uid.substr(0,5)}`;
+                const major = userSnap.exists() ? userSnap.data().major : 'Unknown';
+                requests.push({ uid, nickname, major });
+             } catch (e) {}
           }
           setJoinRequests(requests);
         } catch (error) { setJoinRequests([]); }
@@ -655,34 +712,75 @@ export default function RoomDetails() {
         </Modal>
 
         <Modal visible={reportModalVisible} transparent={true} animationType="fade">
-          <View style={styles.reportModalOverlay}>
-            <View style={styles.reportModalContainer}>
-              <View style={styles.reportModalHeader}>
-                <Text style={styles.reportModalTitle}>Report User</Text>
-                <Pressable style={styles.reportModalClose} onPress={() => { setReportModalVisible(false); setReportedUser(null); setReportReason(''); }}>
-                  <Ionicons name="close" size={20} color="#E8D5DA" />
-                </Pressable>
-              </View>
-              <Text style={styles.reportModalSubtitle}>Reporting: {reportedUser?.nickname || 'User'}</Text>
-              <TextInput
-                style={styles.reportReasonInput}
-                placeholder="Describe the issue..."
-                placeholderTextColor="#999"
-                value={reportReason}
-                onChangeText={setReportReason}
-                multiline={true}
-                maxLength={500}
-              />
-              <View style={styles.reportModalButtons}>
-                <Pressable style={styles.reportCancelButton} onPress={() => { setReportModalVisible(false); setReportedUser(null); setReportReason(''); }}>
-                  <Text style={styles.reportCancelButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable style={[styles.reportSubmitButton, !reportReason.trim() && styles.reportSubmitButtonDisabled]} onPress={submitReport} disabled={!reportReason.trim()}>
-                  <Text style={styles.reportSubmitButtonText}>Submit</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
+          {/* 1. Allows tapping anywhere to dismiss keyboard */}
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            {/* 2. Pushes the modal up when keyboard opens */}
+            <KeyboardAvoidingView 
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={styles.reportModalOverlay}
+            >
+              {/* Prevents tapping the modal itself from closing keyboard unexpectedly */}
+              <TouchableWithoutFeedback>
+                <View style={styles.reportModalContainer}>
+                  <View style={styles.reportModalHeader}>
+                    <Text style={styles.reportModalTitle}>Report User</Text>
+                    <Pressable 
+                      style={styles.reportModalClose} 
+                      onPress={() => { 
+                        setReportModalVisible(false); 
+                        setReportedUser(null); 
+                        setReportReason(''); 
+                      }}
+                    >
+                      <Ionicons name="close" size={20} color="#E8D5DA" />
+                    </Pressable>
+                  </View>
+                  
+                  <Text style={styles.reportModalSubtitle}>
+                    Reporting: {reportedUser?.nickname || 'User'}
+                  </Text>
+                  
+                  <TextInput
+                    style={styles.reportReasonInput}
+                    placeholder="Describe the issue..."
+                    placeholderTextColor="#999"
+                    value={reportReason}
+                    onChangeText={setReportReason}
+                    multiline={true}
+                    maxLength={500}
+                    // These props help the keyboard behave better
+                    blurOnSubmit={true}
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                  />
+                  
+                  <View style={styles.reportModalButtons}>
+                    <Pressable 
+                      style={styles.reportCancelButton} 
+                      onPress={() => { 
+                        setReportModalVisible(false); 
+                        setReportedUser(null); 
+                        setReportReason(''); 
+                      }}
+                    >
+                      <Text style={styles.reportCancelButtonText}>Cancel</Text>
+                    </Pressable>
+                    
+                    <Pressable 
+                      style={[
+                        styles.reportSubmitButton, 
+                        !reportReason.trim() && styles.reportSubmitButtonDisabled
+                      ]} 
+                      onPress={submitReport} 
+                      disabled={!reportReason.trim()}
+                    >
+                      <Text style={styles.reportSubmitButtonText}>Submit</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          </TouchableWithoutFeedback>
         </Modal>
 
       </SafeAreaView>

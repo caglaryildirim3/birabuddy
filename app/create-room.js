@@ -1,6 +1,6 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
 import { useState } from 'react';
 import {
   Alert,
@@ -67,6 +67,7 @@ export default function CreateRoom() {
   const next7Days = getNext7Days();
 
   const handleCreateRoom = async () => {
+    // --- VALIDATION CHECKS (Keep exactly as they were) ---
     if (!name.trim()) {
       Alert.alert('Missing Field', 'Room name is required.');
       return;
@@ -102,6 +103,7 @@ export default function CreateRoom() {
       return;
     }
 
+    // This creates the combined Date + Time object
     const now = new Date();
     const roomDateTime = new Date(
       selectedDate.getFullYear(),
@@ -133,6 +135,8 @@ export default function CreateRoom() {
       return;
     }
 
+    // We still keep these formatted strings if you need them for other UI parts,
+    // but we won't use 'formattedDate' for the main database field anymore.
     const formattedDate = selectedDate.getFullYear() + '-' + 
       String(selectedDate.getMonth() + 1).padStart(2, '0') + '-' + 
       String(selectedDate.getDate()).padStart(2, '0');
@@ -147,8 +151,14 @@ export default function CreateRoom() {
         neighborhood: neighborhood,
         barName: barName.trim(),
         fullLocation: `${barName.trim()}, ${neighborhood}`,
-        date: formattedDate,
-        time: formattedTime,
+        
+        // --- CHANGE START ---
+        // Instead of saving the string 'formattedDate', we save the Timestamp object.
+        // This allows Firestore TTL to automatically delete old rooms.
+        date: Timestamp.fromDate(roomDateTime), 
+        // --- CHANGE END ---
+        
+        time: formattedTime, // We keep time as a string for easy display if needed
         maxParticipants: max,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -173,6 +183,7 @@ export default function CreateRoom() {
       Alert.alert('Error', error.message);
     }
   };
+
 
   const handleButtonPress = () => {
     executeWithDelay(handleCreateRoom);

@@ -72,17 +72,30 @@ export default function JoinRoom() {
     { label: '00:00+', start: 24 }, 
   ];
 
-  const formatDateTimeShort = (dateStr, timeStr) => {
-    if (!dateStr || !timeStr) return 'unknown';
-    const date = new Date(`${dateStr}T${timeStr}`);
-    return date.toLocaleString('en-US', {
+ const formatDateTimeShort = (dateVal, timeStr) => {
+    if (!dateVal) return 'unknown';
+    
+    let dateObj;
+
+    // 1. Handle New Data (Firestore Timestamp)
+    if (dateVal.toDate) {
+      dateObj = dateVal.toDate();
+    } 
+    // 2. Handle Old Data (String)
+    else if (typeof dateVal === 'string' && timeStr) {
+      dateObj = new Date(`${dateVal}T${timeStr}`);
+    } else {
+      return 'unknown';
+    }
+
+    return dateObj.toLocaleString('en-US', {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
       hour12: false
-    }) + ' • ' + timeStr;
+    });
   };
 
   const openFilterModal = () => {
@@ -147,29 +160,55 @@ export default function JoinRoom() {
 
           for (const room of fetchedRooms) {
             const { date, time, createdBy } = room;
-            if (!date || !time) continue;
+            
+            // 1. Safety Check: If no date, skip
+            if (!date) continue;
 
-            const eventDateTime = new Date(`${date}T${time}`);
-            const expiryDateTime = new Date(eventDateTime.getTime() + 24 * 60 * 60 * 1000);
+            let eventDateTime;
 
-            if (expiryDateTime < now && createdBy === user.uid) {
-              try {
-                await deleteDoc(doc(db, 'rooms', room.id));
-              } catch (err) {}
+            // 2. DATA TYPE CHECK (Crucial for your transition)
+            if (date.toDate) {
+                // Case A: It's a Firestore Timestamp (New Rooms)
+                eventDateTime = date.toDate();
+            } else if (typeof date === 'string' && time) {
+                // Case B: It's a String (Old Rooms)
+                // We combine the date string + time string to get the start time
+                eventDateTime = new Date(`${date}T${time}`);
+            } else {
+                continue; // Skip invalid data
+            }
+
+            // 3. THE 24-HOUR RULE
+            // We calculate the exact moment 24 hours AFTER the meeting starts
+            const expiryDateTime = new Date(eventDateTime.getTime() + (24 * 60 * 60 * 1000));
+
+            // 4. Check if the room has expired
+            if (now > expiryDateTime) {
+              // If I am the creator, delete it from the database to clean up
+              if (createdBy === user.uid) {
+                try {
+                  await deleteDoc(doc(db, 'rooms', room.id));
+                  console.log(`Deleted expired room: ${room.name}`);
+                } catch (err) {
+                  console.error("Failed to auto-delete room:", err);
+                }
+              }
+              // STRICTLY SKIP: Don't show this room in the list, even if delete failed
               continue;
             }
 
+            // 5. If not expired, show it (but hide my own rooms from the "Join" list)
             if (createdBy !== user.uid) {
               filteredRooms.push(room);
             }
           }
 
+          // ... (Rest of your existing logic for participants stays here) ...
+          
           filteredRooms.forEach((room) => {
             const participantsRef = collection(db, 'rooms', room.id, 'participants');
             const participantUnsub = onSnapshot(participantsRef, (participantSnapshot) => {
               const participants = participantSnapshot.docs.map(doc => doc.data());
-              
-              // 👇 FIXED: Changed p.userId to p.uid (Critical Fix)
               const isUserParticipant = participants.some(p => p.uid === user.uid);
 
               setParticipantCounts((prev) => ({
@@ -220,7 +259,26 @@ export default function JoinRoom() {
         if (!match) return false;
       }
 
-      if (activeDay && room.date !== activeDay) return false;
+      // --- CHANGE 3 START: Handle Date Filter for both Old (String) and New (Timestamp) data ---
+      if (activeDay) {
+        let roomDateStr;
+
+        if (room.date && room.date.toDate) {
+            // New Data: Convert Timestamp to 'YYYY-MM-DD' string to match the filter
+            const d = room.date.toDate();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            roomDateStr = `${year}-${month}-${day}`;
+        } else {
+            // Old Data: It's already a string like "2025-11-26"
+            roomDateStr = room.date;
+        }
+
+        // Compare the converted string with the filter
+        if (roomDateStr !== activeDay) return false;
+      }
+      // --- CHANGE 3 END ---
 
       if (activeTimeStart !== null) {
         const roomHour = parseInt(room.time.split(':')[0], 10);
@@ -238,6 +296,7 @@ export default function JoinRoom() {
     });
 
     return filtered.sort((a, b) => {
+      // Safety check: sometimes new rooms might not have createdAt immediately
       if (a.createdAt && b.createdAt) {
         return b.createdAt.seconds - a.createdAt.seconds;
       }

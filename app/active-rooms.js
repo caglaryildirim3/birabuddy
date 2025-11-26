@@ -5,17 +5,30 @@ import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
 
-const formatDateTimeShort = (dateStr, timeStr) => {
-  if (!dateStr || !timeStr) return 'unknown';
-  const date = new Date(`${dateStr}T${timeStr}`);
-  return date.toLocaleString('en-US', {
+const formatDateTimeShort = (dateVal, timeStr) => {
+  if (!dateVal) return 'unknown';
+
+  let dateObj;
+
+  // 1. Handle New Data (Firestore Timestamp)
+  if (dateVal.toDate) {
+    dateObj = dateVal.toDate();
+  } 
+  // 2. Handle Old Data (String)
+  else if (typeof dateVal === 'string' && timeStr) {
+    dateObj = new Date(`${dateVal}T${timeStr}`);
+  } else {
+    return 'unknown';
+  }
+
+  return dateObj.toLocaleString('en-US', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false
-  }) + ' • ' + timeStr;
+  });
 };
 
 export default function ActiveRooms() {
@@ -43,14 +56,31 @@ export default function ActiveRooms() {
 
         // 2. Check each room to see if I am a participant
         for (const room of allRooms) {
-            if (!room.date || !room.time) continue;
+            const { date, time } = room;
             
-            const roomTime = new Date(`${room.date}T${room.time}`);
+            // Safety Check
+            if (!date) continue;
+
+            let roomTime;
+
+            // --- DATA TYPE CHECK START ---
+            if (date.toDate) {
+                // Case A: New Data (Timestamp)
+                roomTime = date.toDate();
+            } else if (typeof date === 'string' && time) {
+                // Case B: Old Data (String)
+                roomTime = new Date(`${date}T${time}`);
+            } else {
+                continue; // Skip invalid data
+            }
+            // --- DATA TYPE CHECK END ---
+            
+            // 24-Hour Expiration Check
             const expiryTime = new Date(roomTime.getTime() + 24 * 60 * 60 * 1000);
             
             if (expiryTime < now) continue; // Skip expired
 
-            // CHECK SUBCOLLECTION
+            // CHECK SUBCOLLECTION (Existing Logic)
             const participantDoc = await getDoc(doc(db, 'rooms', room.id, 'participants', auth.currentUser.uid));
             
             // If I am in the subcollection OR I am the creator
@@ -69,6 +99,8 @@ export default function ActiveRooms() {
                 myActiveRooms.push({ ...room, createdByName });
             }
         }
+
+        // ... rest of the function (setActiveRooms, etc.)
 
         setActiveRooms(myActiveRooms);
 

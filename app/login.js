@@ -137,7 +137,11 @@ export default function Login() {
       console.log('Login error:', error);
       let msg = 'Login failed.';
       
-      if (error.code === 'auth/user-not-found') {
+      // ✅ THIS IS THE UPDATE FOR BANNED USERS
+      if (error.code === 'auth/user-disabled') {
+        msg = '⛔ Your account has been disabled by an administrator due to violations.';
+      } 
+      else if (error.code === 'auth/user-not-found') {
         msg = 'No account found. Please go to Register.';
       } else if (error.code === 'auth/wrong-password') {
         msg = 'Incorrect password.';
@@ -155,7 +159,7 @@ export default function Login() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>welcome back :3</Text>
+      <Text style={styles.title}>birabuddy</Text>
       
       <TextInput
         style={styles.input}
@@ -178,6 +182,7 @@ export default function Login() {
         autoComplete="password"
       />
       
+      {/* Main Login Button */}
       <Pressable 
         style={[styles.button, loading && styles.buttonDisabled]} 
         onPress={handleLogin}
@@ -186,35 +191,37 @@ export default function Login() {
         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>log in</Text>}
       </Pressable>
 
-      <Pressable 
-        style={styles.forgotButton} 
-        onPress={handleForgotPassword}
-        disabled={forgotLoading}
-      >
-        <Text style={styles.forgotButtonText}>
-            {forgotLoading ? "Sending..." : "forgot password?"}
-        </Text>
-      </Pressable>
+      <View style={styles.helperLinks}>
+        <Pressable 
+            style={styles.forgotButton} 
+            onPress={handleForgotPassword}
+            disabled={forgotLoading}
+        >
+            <Text style={styles.forgotButtonText}>
+                {forgotLoading ? "Sending..." : "forgot password?"}
+            </Text>
+        </Pressable>
 
-      <Pressable 
-        style={styles.resendButton} 
-        onPress={handleResendVerification}
-        disabled={resendLoading}
-      >
-        <Text style={styles.resendButtonText}>
-            {resendLoading ? "Sending..." : "resend verification email"}
-        </Text>
-      </Pressable>
-
-      <View style={styles.infoBox}>
-        <Text style={styles.infoText}>
-          ⚠️ If "Resend" fails with "No account found", you must Register first.
-        </Text>
+        <Pressable 
+            onPress={handleResendVerification}
+            disabled={resendLoading}
+        >
+            <Text style={styles.resendText}>
+                {resendLoading ? "Sending..." : "resend verification"}
+            </Text>
+        </Pressable>
       </View>
 
+      <View style={styles.divider}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>or</Text>
+        <View style={styles.dividerLine} />
+      </View>
+
+      {/* Prominent Register Button */}
       <Link href="/register" asChild>
-        <Pressable>
-          <Text style={styles.link}>don't have an account? register</Text>
+        <Pressable style={styles.registerButton}>
+          <Text style={styles.registerButtonText}>create a new account</Text>
         </Pressable>
       </Link>
     </View>
@@ -231,72 +238,80 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     color: '#fff',
-    marginBottom: 8,
+    marginBottom: 24,
     textAlign: 'center',
     fontWeight: 'bold',
   },
   input: {
     backgroundColor: '#1e1e1e',
     color: '#fff',
-    padding: 12,
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 12,
     marginBottom: 16,
-    borderColor: '#444',
+    borderColor: '#333',
     borderWidth: 1,
     fontSize: 16,
   },
   button: {
-    backgroundColor: '#333',
-    padding: 14,
-    borderRadius: 8,
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
     alignItems: 'center',
-    marginBottom: 16,
+    marginTop: 8,
+    marginBottom: 20,
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.7,
   },
   buttonText: {
-    color: '#fff',
+    color: '#121212',
     fontSize: 16,
     fontWeight: 'bold',
   },
-  forgotButton: {
-    alignItems: 'center',
-    marginBottom: 12,
+  helperLinks: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 30,
+    paddingHorizontal: 4,
   },
   forgotButtonText: {
     color: '#bbb',
-    fontSize: 13,
-    textDecorationLine: 'underline',
+    fontSize: 14,
   },
-  resendButton: {
-    padding: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  resendButtonText: {
+  resendText: {
     color: '#bbb',
     fontSize: 14,
   },
-  infoBox: {
-    backgroundColor: 'rgba(51, 51, 51, 0.5)',
-    padding: 12,
-    borderRadius: 8,
+  
+  /* New Divider Styles */
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 20,
   },
-  infoText: {
-    color: '#bbb',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 16,
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#333',
   },
-  link: {
-    color: '#bbb',
-    textAlign: 'center',
-    marginTop: 10,
-    textDecorationLine: 'underline',
+  dividerText: {
+    color: '#666',
+    paddingHorizontal: 10,
+    fontSize: 14,
+  },
+
+  /* New Register Button Styles */
+  registerButton: {
+    backgroundColor: '#1e1e1e', // Dark background for contrast
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  registerButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
