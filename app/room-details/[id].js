@@ -600,7 +600,7 @@ const formatDateString = (dateVal) => {
                             </Text>
                             {isParticipant && p.uid !== auth.currentUser?.uid && (
                               <Pressable style={styles.reportButton} onPress={() => handleReportUser(p)}>
-                                <Ionicons name="alert-circle-outline" size={16} color="#E1B604" />
+                                <Ionicons name="alert-circle-outline" size={26} color="#C62828" />
                               </Pressable>
                             )}
                           </View>
