@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   addDoc,
@@ -16,8 +17,10 @@ import {
 } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -27,15 +30,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
-  ActivityIndicator,
-  Keyboard,
-  TouchableWithoutFeedback
+  TouchableWithoutFeedback,
+  View
 } from 'react-native';
 import UserProfile from '../../components/UserProfile';
 import { auth, db } from '../../firebase/firebaseConfig';
 import { useButtonDelay } from '../../hooks/useButtonDelay';
-import { Ionicons } from '@expo/vector-icons';
 
 export default function RoomDetails() {
   const { id } = useLocalSearchParams();
@@ -64,20 +64,15 @@ export default function RoomDetails() {
     return participants.length >= (room.maxParticipants || 0);
   }, [participants, room]);
 
-const formatDateString = (dateVal) => {
+  const formatDateString = (dateVal) => {
     if (!dateVal) return 'Not specified';
-
-    // 1. Handle New Data (Firestore Timestamp)
     if (dateVal.toDate) {
-      // Use Turkish locale 'tr-TR' as per your original code
       return dateVal.toDate().toLocaleDateString('tr-TR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
       });
     }
-
-    // 2. Handle Old Data (String like "2025-11-26")
     if (typeof dateVal === 'string') {
       try {
         const [year, month, day] = dateVal.split('-');
@@ -91,7 +86,6 @@ const formatDateString = (dateVal) => {
         return dateVal;
       }
     }
-
     return 'Not specified';
   };
 
@@ -129,6 +123,7 @@ const formatDateString = (dateVal) => {
       const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
       const userData = userDoc.exists() ? userDoc.data() : {};
       const nickname = userData.instagram || userData.nickname || 'unknown';
+      
       const messagesRef = collection(db, 'rooms', id, 'messages');
       await addDoc(messagesRef, {
         text: message,
@@ -136,6 +131,22 @@ const formatDateString = (dateVal) => {
         uid: auth.currentUser.uid,
         createdAt: serverTimestamp(),
       });
+
+      // Send Notification to others
+      const recipients = participants.filter(p => p.uid !== auth.currentUser.uid);
+      recipients.forEach(async (p) => {
+          await addDoc(collection(db, 'notifications'), {
+            userId: p.uid,
+            type: 'message',
+            title: `New message in ${room?.name || 'Chat'}`,
+            message: message,
+            roomId: id,
+            createdAt: serverTimestamp(),
+            read: false,
+            senderId: auth.currentUser.uid
+          });
+      });
+
       setMessage('');
       flatListRef.current?.scrollToEnd({ animated: true });
     } catch (error) {
@@ -207,31 +218,23 @@ const formatDateString = (dateVal) => {
       
       const roomData = docSnap.data();
 
-      // --- START: 24h Expiration Check ---
+      // Check Expiration
       const now = new Date();
       const { date, time } = roomData;
-      
       if (date) {
          let startDateTime;
-         
-         // A. Detect Data Type
          if (date.toDate) {
              startDateTime = date.toDate();
          } else if (typeof date === 'string' && time) {
              startDateTime = new Date(`${date}T${time}`);
          }
          
-         // B. Check Expiration
          if (startDateTime) {
              const expiry = new Date(startDateTime.getTime() + 24 * 60 * 60 * 1000);
-             
              if (expiry < now) {
-                 // If expired, alert and leave
                  Alert.alert('Room Expired', 'This meetup has ended.', [
                      { text: 'OK', onPress: () => router.replace('/my-rooms') }
                  ]);
-                 
-                 // If I am the host, clean it up from database
                  if (roomData.createdBy === auth.currentUser?.uid) {
                      deleteDoc(roomRef).catch(err => console.log('Auto-delete failed', err));
                  }
@@ -239,18 +242,14 @@ const formatDateString = (dateVal) => {
              }
          }
       }
-      // --- END: Expiration Check ---
 
       setRoom(roomData);
       
-      // ... (Rest of your existing logic for fetching requests below) ...
       const uids = roomData?.requests || [];
       if (uids.length > 0) {
-        // ... (Keep existing request fetching logic) ...
         try {
           const requests = [];
           for (let i = 0; i < uids.length; i++) {
-             // ... (Keep existing loop) ...
              const uid = uids[i];
              if (!uid) continue;
              try {
@@ -303,9 +302,7 @@ const formatDateString = (dateVal) => {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
           try {
-            // 1. Remove from subcollection
             await deleteDoc(doc(db, 'rooms', id, 'participants', participant.uid));
-            // 2. Remove from Main Array (Syncs with Active Rooms)
             const roomRef = doc(db, 'rooms', id);
             await updateDoc(roomRef, {
                 participants: arrayRemove(participant.uid)
@@ -324,6 +321,20 @@ const formatDateString = (dateVal) => {
         requests: arrayUnion(auth.currentUser.uid),
         [`requestTimestamps.${auth.currentUser.uid}`]: serverTimestamp(),
       });
+      
+      if (room?.createdBy) {
+          await addDoc(collection(db, 'notifications'), {
+            userId: room.createdBy,
+            type: 'request',
+            title: 'New Join Request',
+            message: `Someone wants to join your room: ${room.name || 'Room'}`,
+            roomId: id,
+            createdAt: serverTimestamp(),
+            read: false,
+            senderId: auth.currentUser.uid
+          });
+      }
+
       Alert.alert('Success', 'Request sent!');
     } catch (e) { Alert.alert('Error', 'Failed to send request'); }
   };
@@ -382,11 +393,8 @@ const formatDateString = (dateVal) => {
     ]);
   };
 
-  // 👇 THE SAFETY LOCK FOR OVERCROWDING
   const handleApprove = async (requestUser) => {
     if (requestUser.uid === auth.currentUser?.uid) return;
-
-    // 1. Critical Check: Is room full?
     if (participants.length >= (room.maxParticipants || 0)) {
         Alert.alert('Room Full', 'This room has reached its capacity.');
         return;
@@ -396,14 +404,12 @@ const formatDateString = (dateVal) => {
     const participantDocRef = doc(db, 'rooms', id, 'participants', requestUser.uid);
     
     try {
-      // 2. Add to Subcollection
       await setDoc(participantDocRef, { 
           uid: requestUser.uid, 
           nickname: requestUser.nickname, 
           joinedAt: serverTimestamp() 
       });
 
-      // 3. Add to Main Array AND remove request
       await updateDoc(roomRef, { 
           requests: arrayRemove(requestUser.uid),
           participants: arrayUnion(requestUser.uid) 
@@ -466,29 +472,37 @@ const formatDateString = (dateVal) => {
           </View>
         </View>
 
+        {/* --- CHAT MODAL (FIXED KEYBOARD OFFSET) --- */}
         <Modal visible={showChat} animationType="slide" presentationStyle="pageSheet">
-          <View style={styles.chatContainer}>
-            <View style={styles.chatHeader}>
-              <View style={styles.chatHeaderContent}>
-                <Text style={styles.chatTitle}>💬 Room Chat</Text>
-                <Pressable style={styles.closeChatButton} onPress={() => setShowChat(false)}>
-                   <Ionicons name="close" size={24} color="#E8A4C7" />
-                </Pressable>
+          {/* FIX: keyboardVerticalOffset={100} adds space for the modal header 
+              so the keyboard doesn't cover the input.
+          */}
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+            style={{flex: 1, backgroundColor: '#4A3B47'}}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0} 
+          >
+            <View style={styles.chatContainer}>
+              <View style={styles.chatHeader}>
+                <View style={styles.chatHeaderContent}>
+                  <Text style={styles.chatTitle}>room chat 💬</Text>
+                  <Pressable style={styles.closeChatButton} onPress={() => setShowChat(false)}>
+                     <Ionicons name="close" size={24} color="#E8A4C7" />
+                  </Pressable>
+                </View>
               </View>
-            </View>
 
-            <FlatList
-              ref={flatListRef}
-              data={messages}
-              keyExtractor={(item) => item.id}
-              renderItem={renderChatMessage}
-              contentContainerStyle={styles.flatListContent}
-              style={styles.messagesFlatList}
-              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-              showsVerticalScrollIndicator={false}
-            />
+              <FlatList
+                ref={flatListRef}
+                data={messages}
+                keyExtractor={(item) => item.id}
+                renderItem={renderChatMessage}
+                contentContainerStyle={styles.flatListContent}
+                style={styles.messagesFlatList}
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                showsVerticalScrollIndicator={false}
+              />
 
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}>
               <View style={styles.inputContainer}>
                 <View style={styles.inputWrapper}>
                   <TextInput
@@ -506,12 +520,12 @@ const formatDateString = (dateVal) => {
                     onPress={handleSendPress}
                     disabled={message.trim() === '' || isDisabled}
                   >
-                     <Ionicons name="send" size={20} color={isDisabled ? "#999" : "#1C6F75"} />
+                     <Ionicons name="send" size={20} color={isDisabled ? "#999" : "#E1B604"} />
                   </Pressable>
                 </View>
               </View>
-            </KeyboardAvoidingView>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         <ScrollView 
@@ -521,7 +535,7 @@ const formatDateString = (dateVal) => {
         >
           <View style={styles.infoCard}>
             <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>🍺 Room Details</Text>
+              <Text style={styles.cardTitle}>room details 🍺</Text>
               {isCreator && (
                 <View style={styles.creatorBadge}>
                   <Text style={styles.creatorBadgeText}>👑 Host</Text>
@@ -531,7 +545,7 @@ const formatDateString = (dateVal) => {
             
             <View style={styles.infoGrid}>
               <View style={styles.infoItem}>
-                 <Ionicons name="location-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                 <Ionicons name="location-outline" size={20} color="#E1B604" style={{marginRight:10}} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Location</Text>
                   <Text style={styles.infoValue}>{getDisplayLocation()}</Text>
@@ -539,7 +553,7 @@ const formatDateString = (dateVal) => {
               </View>
 
               <View style={styles.infoItem}>
-                 <Ionicons name="calendar-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                 <Ionicons name="calendar-outline" size={20} color="#E1B604" style={{marginRight:10}} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Date</Text>
                   <Text style={styles.infoValue}>{formattedDate}</Text>
@@ -547,7 +561,7 @@ const formatDateString = (dateVal) => {
               </View>
               
               <View style={styles.infoItem}>
-                <Ionicons name="time-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                <Ionicons name="time-outline" size={20} color="#E1B604" style={{marginRight:10}} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Time</Text>
                   <Text style={styles.infoValue}>{formattedTime}</Text>
@@ -555,7 +569,7 @@ const formatDateString = (dateVal) => {
               </View>
               
               <View style={styles.infoItem}>
-                <Ionicons name="people-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                <Ionicons name="people-outline" size={20} color="#E1B604" style={{marginRight:10}} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Capacity</Text>
                   <Text style={styles.infoValue}>{participants.length}/{room?.maxParticipants || 0}</Text>
@@ -564,7 +578,7 @@ const formatDateString = (dateVal) => {
 
               {room?.description && (
                 <View style={styles.infoItem}>
-                   <Ionicons name="document-text-outline" size={20} color="#1C6F75" style={{marginRight:10}} />
+                   <Ionicons name="document-text-outline" size={20} color="#E1B604" style={{marginRight:10}} />
                   <View style={styles.infoContent}>
                     <Text style={styles.infoLabel}>Description</Text>
                     <Text style={styles.infoValue}>{room.description}</Text>
@@ -600,7 +614,7 @@ const formatDateString = (dateVal) => {
                             </Text>
                             {isParticipant && p.uid !== auth.currentUser?.uid && (
                               <Pressable style={styles.reportButton} onPress={() => handleReportUser(p)}>
-                                <Ionicons name="alert-circle-outline" size={26} color="#C62828" />
+                                <Ionicons name="alert-circle-outline" size={24} color="#C62828" />
                               </Pressable>
                             )}
                           </View>
@@ -712,14 +726,11 @@ const formatDateString = (dateVal) => {
         </Modal>
 
         <Modal visible={reportModalVisible} transparent={true} animationType="fade">
-          {/* 1. Allows tapping anywhere to dismiss keyboard */}
           <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            {/* 2. Pushes the modal up when keyboard opens */}
             <KeyboardAvoidingView 
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.reportModalOverlay}
             >
-              {/* Prevents tapping the modal itself from closing keyboard unexpectedly */}
               <TouchableWithoutFeedback>
                 <View style={styles.reportModalContainer}>
                   <View style={styles.reportModalHeader}>
@@ -748,7 +759,6 @@ const formatDateString = (dateVal) => {
                     onChangeText={setReportReason}
                     multiline={true}
                     maxLength={500}
-                    // These props help the keyboard behave better
                     blurOnSubmit={true}
                     returnKeyType="done"
                     onSubmitEditing={Keyboard.dismiss}
@@ -810,11 +820,11 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
   cardTitle: { color: '#4d4c41', fontSize: 20, fontWeight: 'bold' },
   creatorBadge: { backgroundColor: '#E1B604', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  creatorBadgeText: { color: '#1C6F75', fontSize: 12, fontWeight: 'bold' },
+  creatorBadgeText: { color: '#E8D5DA', fontSize: 12, fontWeight: 'bold' },
   infoGrid: { gap: 16 },
   infoItem: { flexDirection: 'row', alignItems: 'flex-start' },
   infoContent: { flex: 1 },
-  infoLabel: { color: '#1C6F75', fontSize: 14, fontWeight: '600', marginBottom: 2 },
+  infoLabel: { color: '#b08f0bff', fontSize: 14, fontWeight: '600', marginBottom: 2 },
   infoValue: { color: '#4d4c41', fontSize: 16, fontWeight: '400', lineHeight: 22 },
   section: { marginHorizontal: 20, marginTop: 24 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
@@ -822,35 +832,43 @@ const styles = StyleSheet.create({
   participantCount: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
   participantCountText: { color: '#E8D5DA', fontSize: 14, fontWeight: '600' },
   requestCount: { backgroundColor: '#E1B604', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  requestCountText: { color: '#1C6F75', fontSize: 14, fontWeight: 'bold' },
+  requestCountText: { color: '#E1B604', fontSize: 14, fontWeight: 'bold' },
   participantsList: { gap: 12 },
   participantCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#3A6A6F' },
   firstParticipantCard: { borderWidth: 2, borderColor: '#E1B604' },
   participantLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  participantAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1C6F75', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  participantAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   participantAvatarText: { color: '#E8D5DA', fontSize: 18, fontWeight: 'bold' },
   participantInfo: { flex: 1 },
   participantNameContainer: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   participantName: { color: '#4d4c41', fontSize: 16, fontWeight: '600' },
   clickableUsername: { textDecorationLine: 'underline' },
   hostBadge: { color: '#E1B604', fontWeight: 'bold' },
-  youBadge: { color: '#1C6F75', fontWeight: 'bold' },
+  youBadge: { color: '#E1B604', fontWeight: 'bold' },
   participantMajor: { color: '#666', fontSize: 14 },
-  reportButton: { marginLeft: 8, padding: 4 },
+  
+  // UPDATED REPORT BUTTON STYLE
+  reportButton: { 
+    marginLeft: 8, 
+    padding: 6,
+    backgroundColor: 'rgba(198, 40, 40, 0.1)',
+    borderRadius: 8
+  },
+  
   kickButton: { backgroundColor: '#C62828', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
   kickButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  approveAllButton: { backgroundColor: '#1C6F75', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
+  approveAllButton: { backgroundColor: '#E1B604', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
   approveAllText: { color: '#E8D5DA', fontSize: 14, fontWeight: 'bold' },
   requestsList: { gap: 12 },
   requestCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#E1B604' },
   requestLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   requestAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  requestAvatarText: { color: '#1C6F75', fontSize: 18, fontWeight: 'bold' },
+  requestAvatarText: { color: '#E1B604', fontSize: 18, fontWeight: 'bold' },
   requestInfo: { flex: 1 },
   requestName: { color: '#4d4c41', fontSize: 16, fontWeight: '600' },
   requestMajor: { color: '#666', fontSize: 14 },
   requestActions: { flexDirection: 'row', gap: 8 },
-  approveButton: { backgroundColor: '#1C6F75', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  approveButton: { backgroundColor: '#E1B604', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   approveButtonDisabled: { backgroundColor: '#999', opacity: 0.6 },
   declineButton: { backgroundColor: '#C62828', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   chatContainer: { flex: 1, backgroundColor: '#4A3B47' },
@@ -882,11 +900,11 @@ const styles = StyleSheet.create({
   joinPrompt: { backgroundColor: '#E8D5DA', padding: 24, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#3A6A6F' },
   joinPromptIcon: { fontSize: 32, marginBottom: 12 },
   joinPromptText: { color: '#4d4c41', fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
-  joinButton: { backgroundColor: '#1C6F75', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, minWidth: 180, alignItems: 'center' },
+  joinButton: { backgroundColor: '#E1B604', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, minWidth: 180, alignItems: 'center' },
   joinButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   pendingContainer: { alignItems: 'center', gap: 12 },
   pendingBadge: { backgroundColor: '#E1B604', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16 },
-  pendingText: { color: '#1C6F75', fontSize: 14, fontWeight: 'bold' },
+  pendingText: { color: '#E1B604', fontSize: 14, fontWeight: 'bold' },
   cancelRequestButton: { paddingHorizontal: 16, paddingVertical: 8 },
   cancelRequestButtonText: { color: '#C62828', fontSize: 14, fontWeight: '500', textDecorationLine: 'underline' },
   emptyState: { alignItems: 'center', padding: 32, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16 },
