@@ -4,17 +4,16 @@ import { collection, deleteDoc, doc, getDoc, getDocs } from 'firebase/firestore'
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
+import { useTranslation } from 'react-i18next';
 
 const formatDateTimeShort = (dateVal, timeStr) => {
   if (!dateVal) return 'unknown';
 
   let dateObj;
 
-  // 1. Handle New Data (Firestore Timestamp)
   if (dateVal.toDate) {
     dateObj = dateVal.toDate();
   } 
-  // 2. Handle Old Data (String)
   else if (typeof dateVal === 'string' && timeStr) {
     dateObj = new Date(`${dateVal}T${timeStr}`);
   } else {
@@ -32,6 +31,7 @@ const formatDateTimeShort = (dateVal, timeStr) => {
 };
 
 export default function ActiveRooms() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [activeRooms, setActiveRooms] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -46,7 +46,6 @@ export default function ActiveRooms() {
       try {
         setLoading(true);
         
-        // 1. Fetch ALL rooms (It's okay for <500 rooms)
         const roomsRef = collection(db, 'rooms');
         const snapshot = await getDocs(roomsRef);
         const allRooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -54,39 +53,29 @@ export default function ActiveRooms() {
         const myActiveRooms = [];
         const now = new Date();
 
-        // 2. Check each room to see if I am a participant
         for (const room of allRooms) {
             const { date, time } = room;
             
-            // Safety Check
             if (!date) continue;
 
             let roomTime;
 
-            // --- DATA TYPE CHECK START ---
             if (date.toDate) {
-                // Case A: New Data (Timestamp)
                 roomTime = date.toDate();
             } else if (typeof date === 'string' && time) {
-                // Case B: Old Data (String)
                 roomTime = new Date(`${date}T${time}`);
             } else {
-                continue; // Skip invalid data
+                continue;
             }
-            // --- DATA TYPE CHECK END ---
             
-            // 24-Hour Expiration Check
             const expiryTime = new Date(roomTime.getTime() + 24 * 60 * 60 * 1000);
             
-            if (expiryTime < now) continue; // Skip expired
+            if (expiryTime < now) continue;
 
-            // CHECK SUBCOLLECTION (Existing Logic)
             const participantDoc = await getDoc(doc(db, 'rooms', room.id, 'participants', auth.currentUser.uid));
             
-            // If I am in the subcollection OR I am the creator
             if (participantDoc.exists() || room.createdBy === auth.currentUser.uid) {
                 
-                // Get Creator Name
                 let createdByName = 'Unknown User';
                 try {
                     const creatorDoc = await getDoc(doc(db, 'users', room.createdBy));
@@ -99,8 +88,6 @@ export default function ActiveRooms() {
                 myActiveRooms.push({ ...room, createdByName });
             }
         }
-
-        // ... rest of the function (setActiveRooms, etc.)
 
         setActiveRooms(myActiveRooms);
 
@@ -116,19 +103,19 @@ export default function ActiveRooms() {
 
   const handleLeaveRoom = (room) => {
     Alert.alert(
-      "Leave Room",
-      `Leave "${room.name}"?`,
+      t('leaveRoom'),
+      t('leaveRoomConfirm', { roomName: room.name }),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t('cancel'), style: "cancel" },
         {
-          text: "Leave",
+          text: t('leave'),
           style: "destructive",
           onPress: async () => {
             try {
               await deleteDoc(doc(db, 'rooms', room.id, 'participants', auth.currentUser.uid));
               setActiveRooms(prevRooms => prevRooms.filter(r => r.id !== room.id));
             } catch (error) {
-              Alert.alert('Error', 'Failed to leave room.');
+              Alert.alert(t('error'), t('failedToLeaveRoom'));
             }
           }
         }
@@ -147,11 +134,11 @@ export default function ActiveRooms() {
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
           </Pressable>
-          <Text style={styles.title}>active rooms</Text>
+          <Text style={styles.title}>{t('activeRooms')}</Text>
           <View style={{width: 24}} />
         </View>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Text style={styles.loadingText}>{t('loading')}</Text>
         </View>
       </View>
     );
@@ -163,7 +150,7 @@ export default function ActiveRooms() {
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
         </Pressable>
-        <Text style={styles.title}>active rooms</Text>
+        <Text style={styles.title}>{t('activeRooms')}</Text>
         <View style={{width: 24}} />
       </View>
 
@@ -175,12 +162,12 @@ export default function ActiveRooms() {
         {activeRooms.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyIcon}>🍺</Text>
-            <Text style={styles.emptyTitle}>no active rooms</Text>
+            <Text style={styles.emptyTitle}>{t('noActiveRooms')}</Text>
             <Pressable 
               style={styles.browseButton}
               onPress={() => router.push('/room-list')}
             >
-              <Text style={styles.browseButtonText}>BROWSE ROOMS</Text>
+              <Text style={styles.browseButtonText}>{t('browseRooms')}</Text>
             </Pressable>
           </View>
         ) : (
@@ -199,7 +186,7 @@ export default function ActiveRooms() {
 
                 <View style={styles.infoRow}>
                   <Ionicons name="location-outline" size={14} color="#4d4c41" />
-                  <Text style={styles.location} numberOfLines={1}>{room.neighborhood || 'No location'}</Text>
+                  <Text style={styles.location} numberOfLines={1}>{room.neighborhood || t('noLocation')}</Text>
                 </View>
                 <View style={styles.infoRow}>
                   <Ionicons name="time-outline" size={14} color="#4d4c41" />
@@ -211,7 +198,7 @@ export default function ActiveRooms() {
                 <View style={styles.countContainer}>
                   <Ionicons name="people" size={16} color="#3A6A6F" />
                   <Text style={styles.peopleCount}>
-                     {room.maxParticipants} max
+                     {room.maxParticipants} {t('max')}
                   </Text>
                 </View>
 
@@ -222,7 +209,7 @@ export default function ActiveRooms() {
                     handleLeaveRoom(room);
                   }}
                 >
-                  <Text style={styles.leaveButtonText}>Leave</Text>
+                  <Text style={styles.leaveButtonText}>{t('leave')}</Text>
                 </Pressable>
               </View>
             </Pressable>

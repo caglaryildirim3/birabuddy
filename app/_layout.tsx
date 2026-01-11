@@ -1,3 +1,4 @@
+import '../i18n';  // ← BUNU EKLE EN ÜSTE
 import { Stack, usePathname, useRouter } from 'expo-router';
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';

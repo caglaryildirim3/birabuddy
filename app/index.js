@@ -5,13 +5,15 @@ import { useEffect, useState } from 'react';
 import { Alert, Dimensions, Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import CheersImage from '../assets/cheers.png';
 import { auth } from '../firebase/firebaseConfig';
+import { useTranslation } from 'react-i18next';
 
 const { width, height } = Dimensions.get('window');
-const GAP = 20; // Increased gap for better separation
+const GAP = 20;
 const PADDING = 24;
 const BUTTON_WIDTH = (width - (PADDING * 2) - GAP) / 2; 
 
 export default function Home() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [activeRooms, setActiveRooms] = useState([]);
   const [notifications, setNotifications] = useState([]); 
@@ -31,19 +33,19 @@ export default function Home() {
 
   const handleSignOut = async () => {
     Alert.alert(
-      "Sign Out",
-      "Are you sure you want to sign out?",
+      t('signOut'),
+      t('signOutConfirm'),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t('cancel'), style: "cancel" },
         {
-          text: "Sign Out",
+          text: t('signOut'),
           style: "destructive",
           onPress: async () => {
             try {
               await signOut(auth);
               router.replace('/login');
             } catch (error) {
-              Alert.alert('Error', 'Failed to sign out.');
+              Alert.alert(t('error'), t('failedToSignOut'));
             }
           }
         }
@@ -83,14 +85,14 @@ export default function Home() {
       >
         {/* 1. HEADER SECTION */}
         <View style={styles.headerSection}>
-          <Text style={styles.title}>birabuddy</Text>
-          <Text style={styles.subtitle}>have fun!</Text>
+          <Text style={styles.title}>{t('appName')}</Text>
+          <Text style={styles.subtitle}>{t('tagline')}</Text>
         </View>
 
         {/* 2. DYNAMIC CONTENT (Active Rooms) */}
         {activeRooms.length > 0 && (
           <View style={styles.activeRoomsSection}>
-            <Text style={styles.sectionTitle}>your active rooms</Text>
+            <Text style={styles.sectionTitle}>{t('yourActiveRooms')}</Text>
             {activeRooms.map((room) => (
               <View key={room.id} style={styles.activeRoomCard}>
                 <Text style={styles.roomName}>{room.name}</Text>
@@ -108,7 +110,7 @@ export default function Home() {
                 <View style={styles.iconCircle}>
                   <Ionicons name="add" size={32} color="#4A3B47" />
                 </View>
-                <Text style={styles.gridButtonText}>create a room</Text>
+                <Text style={styles.gridButtonText}>{t('createARoom')}</Text>
               </Pressable>
             </Link>
 
@@ -117,7 +119,7 @@ export default function Home() {
                 <View style={styles.iconCircle}>
                   <Ionicons name="search" size={28} color="#4A3B47" />
                 </View>
-                <Text style={styles.gridButtonText}>join a room</Text>
+                <Text style={styles.gridButtonText}>{t('joinARoom')}</Text>
               </Pressable>
             </Link>
           </View>
@@ -128,7 +130,7 @@ export default function Home() {
                 <View style={styles.iconCircle}>
                   <Ionicons name="home" size={28} color="#4A3B47" />
                 </View>
-                <Text style={styles.gridButtonText}>my rooms</Text>
+                <Text style={styles.gridButtonText}>{t('myRooms')}</Text>
               </Pressable>
             </Link>
 
@@ -136,7 +138,7 @@ export default function Home() {
               <View style={styles.iconCircle}>
                 <Ionicons name="beer" size={28} color="#4A3B47" />
               </View>
-              <Text style={styles.gridButtonText}>active rooms</Text>
+              <Text style={styles.gridButtonText}>{t('activeRooms')}</Text>
             </Pressable>
           </View>
         </View>
@@ -194,18 +196,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   
-  // SCROLL VIEW LAYOUT
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    flexGrow: 1, // Ensures content fills screen height
-    justifyContent: 'space-between', // Distributes sections evenly!
+    flexGrow: 1,
+    justifyContent: 'space-between',
     paddingHorizontal: PADDING,
     paddingBottom: 40, 
   },
 
-  // 1. HEADER
   headerSection: {
     alignItems: 'center',
     marginTop: 20, 
@@ -225,7 +225,6 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
 
-  // 2. ACTIVE ROOMS
   activeRoomsSection: {
     width: '100%',
     marginBottom: 20,
@@ -257,11 +256,10 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
 
-  // 3. GRID MENU
   gridSection: {
     width: '100%',
     gap: GAP,
-    marginVertical: 20, // Breathing room from header/footer
+    marginVertical: 20,
   },
   gridRow: {
     flexDirection: 'row',
@@ -269,12 +267,11 @@ const styles = StyleSheet.create({
   },
   gridButton: {
     width: BUTTON_WIDTH,
-    height: BUTTON_WIDTH, // Perfect Square
+    height: BUTTON_WIDTH,
     backgroundColor: '#E8D5DA',
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    // Soft Shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -297,11 +294,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // 4. FOOTER
   footerSection: {
     alignItems: 'center',
     justifyContent: 'flex-end',
-    marginBottom: 40, // Push slightly up from very bottom
+    marginBottom: 40,
   },
   cheers: {
     width: 100,
@@ -310,7 +306,6 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
 
-  // FAB
   fab: {
     position: 'absolute',
     bottom: 30,

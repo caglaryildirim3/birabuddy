@@ -12,13 +12,15 @@ import {
   Text,
   TextInput,
   View,
-  SafeAreaView // Added SafeAreaView
+  SafeAreaView
 } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
 import { useButtonDelay } from '../hooks/useButtonDelay';
-import { Ionicons } from '@expo/vector-icons'; // Added Ionicons
+import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 
 export default function CreateRoom() {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
@@ -47,7 +49,7 @@ export default function CreateRoom() {
 
   const getNext7Days = () => {
     const days = [];
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayNames = [t('sunday'), t('monday'), t('tuesday'), t('wednesday'), t('thursday'), t('friday'), t('saturday')];
     
     for (let i = 0; i < 7; i++) {
       const date = new Date();
@@ -67,43 +69,41 @@ export default function CreateRoom() {
   const next7Days = getNext7Days();
 
   const handleCreateRoom = async () => {
-    // --- VALIDATION CHECKS (Keep exactly as they were) ---
     if (!name.trim()) {
-      Alert.alert('Missing Field', 'Room name is required.');
+      Alert.alert(t('missingField'), t('roomNameRequired'));
       return;
     }
     
     if (name.trim().length > NAME_LIMIT) {
-      Alert.alert('Name Too Long', `Room name must be ${NAME_LIMIT} characters or less.`);
+      Alert.alert(t('nameTooLong'), t('roomNameLimit', { limit: NAME_LIMIT }));
       return;
     }
 
     if (!neighborhood) {
-      Alert.alert('Missing Field', 'Please select a neighborhood.');
+      Alert.alert(t('missingField'), t('selectNeighborhood'));
       return;
     }
 
     if (!barName.trim()) {
-      Alert.alert('Missing Field', 'Bar name is required.');
+      Alert.alert(t('missingField'), t('barNameRequired'));
       return;
     }
     
     if (barName.trim().length > BAR_NAME_LIMIT) {
-      Alert.alert('Bar Name Too Long', `Bar name must be ${BAR_NAME_LIMIT} characters or less.`);
+      Alert.alert(t('barNameTooLong'), t('barNameLimit', { limit: BAR_NAME_LIMIT }));
       return;
     }
 
     if (description.length > DESCRIPTION_LIMIT) {
-      Alert.alert('Description Too Long', `Description must be ${DESCRIPTION_LIMIT} characters or less.`);
+      Alert.alert(t('descriptionTooLong'), t('descriptionLimit', { limit: DESCRIPTION_LIMIT }));
       return;
     }
 
     if (!maxPeople) {
-      Alert.alert('Missing Field', 'Max people is required.');
+      Alert.alert(t('missingField'), t('maxPeopleRequired'));
       return;
     }
 
-    // This creates the combined Date + Time object
     const now = new Date();
     const roomDateTime = new Date(
       selectedDate.getFullYear(),
@@ -115,28 +115,26 @@ export default function CreateRoom() {
 
     if (roomDateTime < now) {
       Alert.alert(
-        'Invalid Date/Time',
-        'Please choose a time that is not in the past.'
+        t('invalidDateTime'),
+        t('timeInPast')
       );
       return;
     }
 
     if (selectedDate > maxDate) {
       Alert.alert(
-        'Date Too Far Ahead',
-        'You can only create rooms for the next 7 days.'
+        t('dateTooFarAhead'),
+        t('sevenDaysLimit')
       );
       return;
     }
 
     const max = parseInt(maxPeople);
     if (isNaN(max) || max < 2 || max > 10) {
-      Alert.alert('Invalid Max People', 'Max people must be a number between 2 and 10.');
+      Alert.alert(t('invalidMaxPeople'), t('maxPeopleBetween'));
       return;
     }
 
-    // We still keep these formatted strings if you need them for other UI parts,
-    // but we won't use 'formattedDate' for the main database field anymore.
     const formattedDate = selectedDate.getFullYear() + '-' + 
       String(selectedDate.getMonth() + 1).padStart(2, '0') + '-' + 
       String(selectedDate.getDate()).padStart(2, '0');
@@ -151,14 +149,8 @@ export default function CreateRoom() {
         neighborhood: neighborhood,
         barName: barName.trim(),
         fullLocation: `${barName.trim()}, ${neighborhood}`,
-        
-        // --- CHANGE START ---
-        // Instead of saving the string 'formattedDate', we save the Timestamp object.
-        // This allows Firestore TTL to automatically delete old rooms.
         date: Timestamp.fromDate(roomDateTime), 
-        // --- CHANGE END ---
-        
-        time: formattedTime, // We keep time as a string for easy display if needed
+        time: formattedTime,
         maxParticipants: max,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -174,16 +166,15 @@ export default function CreateRoom() {
         joinedAt: serverTimestamp(),
       });
 
-      Alert.alert('Room Created', 'Your room was successfully created.');
+      Alert.alert(t('roomCreated'), t('roomCreatedSuccess'));
       
       router.replace('/my-rooms');
       
     } catch (error) {
       console.error('Error creating room:', error);
-      Alert.alert('Error', error.message);
+      Alert.alert(t('error'), error.message);
     }
   };
-
 
   const handleButtonPress = () => {
     executeWithDelay(handleCreateRoom);
@@ -229,7 +220,6 @@ export default function CreateRoom() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
-        {/* Back Button Header */}
         <View style={styles.headerRow}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={28} color="#E8A4C7" />
@@ -237,8 +227,8 @@ export default function CreateRoom() {
         </View>
 
         <ScrollView contentContainerStyle={styles.container}>
-          <Text style={styles.title}>🍺 create a room</Text>
-          <Text style={styles.subtitle}>feel free!</Text>
+          <Text style={styles.title}>🍺 {t('createARoom')}</Text>
+          <Text style={styles.subtitle}>{t('feelFree')}</Text>
           
           <View style={styles.inputContainer}>
             <TextInput
@@ -246,7 +236,7 @@ export default function CreateRoom() {
                 styles.input,
                 name.length > NAME_LIMIT && styles.inputError
               ]}
-              placeholder="room name"
+              placeholder={t('roomNamePlaceholder')}
               placeholderTextColor="#999"
               value={name}
               onChangeText={setName}
@@ -267,7 +257,7 @@ export default function CreateRoom() {
                 styles.textArea,
                 description.length > DESCRIPTION_LIMIT && styles.inputError
               ]}
-              placeholder="description (optional)"
+              placeholder={t('descriptionPlaceholder')}
               placeholderTextColor="#999"
               value={description}
               onChangeText={setDescription}
@@ -284,10 +274,10 @@ export default function CreateRoom() {
             </Text>
           </View>
 
-          <Text style={styles.sectionTitle}>📍 Where to meet?</Text>
+          <Text style={styles.sectionTitle}>📍 {t('whereToMeet')}</Text>
           
           <View style={styles.inputContainer}>
-            <Text style={styles.fieldLabel}>neighborhood:</Text>
+            <Text style={styles.fieldLabel}>{t('neighborhood')}</Text>
             <ScrollView 
               horizontal 
               showsHorizontalScrollIndicator={false}
@@ -314,13 +304,13 @@ export default function CreateRoom() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.fieldLabel}>bar name:</Text>
+            <Text style={styles.fieldLabel}>{t('barName')}</Text>
             <TextInput
               style={[
                 styles.input,
                 barName.length > BAR_NAME_LIMIT && styles.inputError
               ]}
-              placeholder="which bar or place?"
+              placeholder={t('barPlaceholder')}
               placeholderTextColor="#999"
               value={barName}
               onChangeText={setBarName}
@@ -335,7 +325,7 @@ export default function CreateRoom() {
           </View>
 
           <View style={styles.dateContainer}>
-            <Text style={styles.sectionTitle}>📅 Pick a day</Text>
+            <Text style={styles.sectionTitle}>📅 {t('pickADay')}</Text>
             <ScrollView 
               horizontal 
               showsHorizontalScrollIndicator={false}
@@ -366,7 +356,7 @@ export default function CreateRoom() {
                     {dayObj.displayDate}
                   </Text>
                   {dayObj.isToday && (
-                    <Text style={styles.todayLabel}>today</Text>
+                    <Text style={styles.todayLabel}>{t('today')}</Text>
                   )}
                 </Pressable>
               ))}
@@ -391,7 +381,7 @@ export default function CreateRoom() {
 
           <TextInput
             style={styles.input}
-            placeholder="max people (2-10)"
+            placeholder={t('maxPeoplePlaceholder')}
             placeholderTextColor="#999"
             keyboardType="numeric"
             value={maxPeople}
@@ -410,7 +400,7 @@ export default function CreateRoom() {
               styles.buttonText,
               isDisabled && styles.buttonTextDisabled
             ]}>
-              {isDisabled ? '⏳ creating room...' : '✨ create room'}
+              {isDisabled ? '⏳ ' + t('creatingRoom') : '✨ ' + t('createRoomButton')}
             </Text>
           </Pressable>
 
@@ -421,22 +411,21 @@ export default function CreateRoom() {
 }
 
 const styles = StyleSheet.create({
-  // Header row style for the back button
   headerRow: {
     paddingHorizontal: 20,
-    paddingTop: 10, // Minimal padding from top safe area
+    paddingTop: 10,
     paddingBottom: 0,
     justifyContent: 'center',
     alignItems: 'flex-start',
   },
   backButton: {
     padding: 8,
-    marginLeft: -8, // Align with padding
+    marginLeft: -8,
   },
   container: {
     backgroundColor: '#4A3B47',
     padding: 24,
-    paddingTop: 10, // Reduced top padding since header is above
+    paddingTop: 10,
     flexGrow: 1,
   },
   title: {
