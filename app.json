@@ -2,7 +2,7 @@
   "expo": {
     "name": "birabuddy",
     "slug": "birabuddy",
-    "version": "1.0.3",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "birabuddy",
@@ -17,7 +17,7 @@
     "updates": {
       "url": "https://u.expo.dev/61232958-c524-4b7e-97c2-3a40115be165"
     },
-    "runtimeVersion": "1.0.3",
+    "runtimeVersion": "1.0.1",
     "ios": {
       "supportsTablet": false,
       "deploymentTarget": "13.4",
