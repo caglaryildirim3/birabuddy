@@ -24,10 +24,12 @@ import {
   View
 } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
+import { useTranslation } from 'react-i18next';
 
 const NEIGHBORHOODS = ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'];
 
 export default function JoinRoom() {
+  const { t } = useTranslation();
   const [rooms, setRooms] = useState([]);
   const [participantCounts, setParticipantCounts] = useState({});
   const [userParticipations, setUserParticipations] = useState({});
@@ -62,18 +64,18 @@ export default function JoinRoom() {
   }, []);
 
   const timeSlots = [
-    { label: 'Before 18:00', start: -1 },
-    { label: '18:00-19:00', start: 18 },
-    { label: '19:00-20:00', start: 19 },
-    { label: '20:00-21:00', start: 20 },
-    { label: '21:00-22:00', start: 21 },
-    { label: '22:00-23:00', start: 22 },
-    { label: '23:00-00:00', start: 23 },
-    { label: '00:00+', start: 24 }, 
+    { label: t('before18'), start: -1 },
+    { label: t('time1819'), start: 18 },
+    { label: t('time1920'), start: 19 },
+    { label: t('time2021'), start: 20 },
+    { label: t('time2122'), start: 21 },
+    { label: t('time2223'), start: 22 },
+    { label: t('time2300'), start: 23 },
+    { label: t('time00plus'), start: 24 }, 
   ];
 
  const formatDateTimeShort = (dateVal, timeStr) => {
-    if (!dateVal) return 'unknown';
+    if (!dateVal) return t('unknown');
     
     let dateObj;
 
@@ -85,7 +87,7 @@ export default function JoinRoom() {
     else if (typeof dateVal === 'string' && timeStr) {
       dateObj = new Date(`${dateVal}T${timeStr}`);
     } else {
-      return 'unknown';
+      return t('unknown');
     }
 
     return dateObj.toLocaleString('en-US', {
@@ -314,7 +316,7 @@ export default function JoinRoom() {
       });
       
     } catch (error) {
-      Alert.alert('Error', error.message);
+      Alert.alert(t('error'), error.message);
     }
   };
 
@@ -352,7 +354,7 @@ export default function JoinRoom() {
 
           {requested ? (
             <View style={styles.requestedBadge}>
-              <Text style={styles.requestedText}>Pending</Text>
+              <Text style={styles.requestedText}>{t('pending')}</Text>
             </View>
           ) : (
             <Pressable
@@ -362,7 +364,7 @@ export default function JoinRoom() {
                 handleRequest(item.id, item.requests || []);
               }}
             >
-              <Text style={styles.joinButtonText}>Join</Text>
+              <Text style={styles.joinButtonText}>{t('join')}</Text>
             </Pressable>
           )}
         </View>
@@ -377,11 +379,11 @@ export default function JoinRoom() {
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
           </Pressable>
-          <Text style={styles.headerTitle}>join a meetup 🍻</Text>
+          <Text style={styles.headerTitle}>{t('joinAMeetup')} 🍻</Text>
           <View style={{width: 40}} /> 
         </View>
         <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
-          <Text style={styles.emptyText}>Loading...</Text>
+          <Text style={styles.emptyText}>{t('loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -393,7 +395,7 @@ export default function JoinRoom() {
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
         </Pressable>
-        <Text style={styles.headerTitle}>join a meetup 🍻</Text>
+        <Text style={styles.headerTitle}>{t('joinAMeetup')} 🍻</Text>
         <Pressable style={styles.filterIconBtn} onPress={openFilterModal}>
           <Ionicons name="filter" size={24} color="#E1B604" />
         </Pressable>
@@ -408,20 +410,20 @@ export default function JoinRoom() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Filter Rooms</Text>
+              <Text style={styles.modalTitle}>{t('filterRooms')}</Text>
               <Pressable onPress={() => setIsFilterVisible(false)}>
                 <Ionicons name="close" size={24} color="#4A3B47" />
               </Pressable>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.filterLabel}>Room Name</Text>
+              <Text style={styles.filterLabel}>{t('roomName')}</Text>
               <TextInput 
                 style={styles.input} 
-                placeholder="Search by name..." 
+                placeholder={t('searchByName')}
                 value={tempName}
                 onChangeText={setTempName}
               />
-              <Text style={styles.filterLabel}>Neighborhoods</Text>
+              <Text style={styles.filterLabel}>{t('neighborhoods')}</Text>
               <View style={styles.wrapContainer}>
                 {NEIGHBORHOODS.map((hood) => {
                   const isSelected = tempLocations.includes(hood);
@@ -438,13 +440,13 @@ export default function JoinRoom() {
                   );
                 })}
               </View>
-              <Text style={styles.filterLabel}>Day</Text>
+              <Text style={styles.filterLabel}>{t('day')}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
                 <Pressable 
                   style={[styles.chip, tempDay === null && styles.chipActive]}
                   onPress={() => setTempDay(null)}
                 >
-                  <Text style={[styles.chipText, tempDay === null && styles.chipTextActive]}>Any</Text>
+                  <Text style={[styles.chipText, tempDay === null && styles.chipTextActive]}>{t('any')}</Text>
                 </Pressable>
                 {next7Days.map((day) => (
                   <Pressable
@@ -458,13 +460,13 @@ export default function JoinRoom() {
                   </Pressable>
                 ))}
               </ScrollView>
-              <Text style={styles.filterLabel}>Time Interval</Text>
+              <Text style={styles.filterLabel}>{t('timeInterval')}</Text>
               <View style={styles.wrapContainer}>
                 <Pressable 
                   style={[styles.chip, tempTimeStart === null && styles.chipActive]}
                   onPress={() => setTempTimeStart(null)}
                 >
-                  <Text style={[styles.chipText, tempTimeStart === null && styles.chipTextActive]}>Any</Text>
+                  <Text style={[styles.chipText, tempTimeStart === null && styles.chipTextActive]}>{t('any')}</Text>
                 </Pressable>
                 {timeSlots.map((slot) => (
                   <Pressable
@@ -481,10 +483,10 @@ export default function JoinRoom() {
             </ScrollView>
             <View style={styles.modalFooter}>
               <Pressable style={styles.clearButton} onPress={clearFilters}>
-                <Text style={styles.clearButtonText}>Clear All</Text>
+                <Text style={styles.clearButtonText}>{t('clearAllFilters')}</Text>
               </Pressable>
               <Pressable style={styles.applyButton} onPress={applyFilters}>
-                <Text style={styles.applyButtonText}>Show Results</Text>
+                <Text style={styles.applyButtonText}>{t('showResults')}</Text>
               </Pressable>
             </View>
           </View>
@@ -493,7 +495,7 @@ export default function JoinRoom() {
 
       {availableRooms.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>no rooms found</Text>
+          <Text style={styles.emptyText}>{t('noRoomsFound')}</Text>
           <Pressable 
              onPress={() => {
                setActiveName('');
@@ -502,7 +504,7 @@ export default function JoinRoom() {
                setActiveTimeStart(null);
              }}
           >
-            <Text style={{color: '#E1B604', marginTop: 10}}>Clear Filters</Text>
+            <Text style={{color: '#E1B604', marginTop: 10}}>{t('clearFilters')}</Text>
           </Pressable>
         </View>
       ) : (

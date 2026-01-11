@@ -4,8 +4,10 @@ import { createUserWithEmailAndPassword, sendEmailVerification, signOut, deleteU
 import { auth, db } from '../firebase/firebaseConfig';
 import { Link, useRouter } from 'expo-router';
 import { setDoc, doc } from 'firebase/firestore';
+import { useTranslation } from 'react-i18next';
 
 export default function Register() {
+  const { t } = useTranslation();
   const [instagramUsername, setInstagramUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -99,7 +101,7 @@ Aşağıdaki bilgileriniz diğer kullanıcılar tarafından görülebilir:
 - Oda detayları
 
 ### 5.3 Özel Bilgiler
-Aşağıdaki bilgiler yalnızca sizin görebileceğiniz bilgilerdir:
+Aşağıdaki bilgiler yalnızca sizin göreceğiniz bilgilerdir:
 - E-posta adresi
 - Şifre bilgileri
 
@@ -170,7 +172,6 @@ Bu Politika, uygulama kullanımına başladığınız tarihten itibaren yürürl
 **Versiyon:** 1.0
 
 *Bu politika, 6698 sayılı Kişisel Verilerin Korunması Kanunu ve ilgili mevzuat uyarınca hazırlanmıştır.*
-
   `;
 
   // Kullanım Koşulları ve Gizlilik Politikası Metni
@@ -429,50 +430,50 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
     return true;
   };
 
-  const handleRegister = async () => {
+const handleRegister = async () => {
     const trimmedEmail = email.trim();
     const trimmedInstagramUsername = instagramUsername.trim();
 
     if (!trimmedEmail || !password || !trimmedInstagramUsername) {
-      Alert.alert('Missing Fields', 'Please fill in all fields.');
+      Alert.alert(t('missingFields'), t('missingFieldsRegister'));
       return;
     }
 
     if (!kvkkAccepted) {
-      Alert.alert('KVKK Onayı Gerekli', 'Devam etmek için KVKK aydınlatma metnini kabul etmeniz gerekmektedir.');
+      Alert.alert(t('kvkkRequired'), t('kvkkRequiredMessage'));
       return;
     }
 
     if (!ageConfirmed) {
-      Alert.alert('Yaş Onayı Gerekli', 'Bu uygulama sadece 18 yaş ve üzeri kişiler içindir. Yaş onayını vermeniz gerekmektedir.');
+      Alert.alert(t('ageConfirmRequired'), t('ageConfirmMessage'));
       return;
     }
 
     if (!termsAccepted) {
-      Alert.alert('Kullanım Koşulları', 'Devam etmek için Kullanım Koşulları ve Gizlilik Politikasını kabul etmeniz gerekmektedir.');
+      Alert.alert(t('termsRequired'), t('termsRequiredMessage'));
       return;
     }
 
     if (!validateInstagramUsername(trimmedInstagramUsername)) {
       Alert.alert(
-        'Invalid Instagram Username', 
-        'Instagram username must be 2-30 characters and contain only letters, numbers, dots, or underscores.'
+        t('invalidUsername'), 
+        t('invalidInstagramUsername')
       );
       return;
     }
 
     if (!validateEmail(trimmedEmail)) {
       Alert.alert(
-        'Invalid Email',
-        'Please enter a valid university student email (ending in .edu.tr or .edu)'
+        t('invalidEmail'),
+        t('invalidEmailRegister')
       );
       return;
     }
 
     if (!validatePassword(password)) {
       Alert.alert(
-        'Weak Password',
-        'Password must be at least 6 characters long.'
+        t('weakPassword'),
+        t('weakPassword')
       );
       return;
     }
@@ -496,8 +497,8 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
         } catch (cleanupError) {}
         
         Alert.alert(
-          'Registration Failed',
-          'We couldn\'t send the verification email. Please try again.'
+          t('registrationFailed'),
+          t('registrationFailed')
         );
         return;
       }
@@ -544,11 +545,11 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
       await signOut(auth);
 
       Alert.alert(
-        '✅ Account Created Successfully!',
-        `Verification email sent to ${trimmedEmail}.\n\nPlease check your inbox (including spam folder) and click the verification link before logging in.`,
+        t('accountCreatedSuccess'),
+        t('verificationSentTo', { email: trimmedEmail }),
         [
           {
-            text: 'Got it!',
+            text: t('gotIt'),
             onPress: () => router.push('/login')
           }
         ]
@@ -563,17 +564,17 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
         } catch (cleanupError) {}
       }
 
-      let errorMessage = 'Registration failed. Please try again.';
+      let errorMessage = t('registrationFailedGeneric');
       
       if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'This email is already registered. Try logging in instead.';
+        errorMessage = t('emailAlreadyInUse');
       } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'Password is too weak.';
+        errorMessage = t('passwordTooWeak');
       } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Please enter a valid email address.';
+        errorMessage = t('invalidEmailAddress');
       }
       
-      Alert.alert('Registration Failed', errorMessage);
+      Alert.alert(t('registrationFailed'), errorMessage);
     } finally {
       setLoading(false);
     }
@@ -581,12 +582,12 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>join meetups</Text>
-      <Text style={styles.subtitle}>for university students</Text>
+      <Text style={styles.title}>{t('joinMeetups')}</Text>
+      <Text style={styles.subtitle}>{t('forUniversityStudents')}</Text>
       
       <TextInput
         style={styles.input}
-        placeholder="instagram username (will be public)"
+        placeholder={t('instagramUsernamePlaceholder')}
         placeholderTextColor="#aaa"
         value={instagramUsername}
         onChangeText={setInstagramUsername}
@@ -596,7 +597,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
       
       <TextInput
         style={styles.input}
-        placeholder="student email (.edu or .edu.tr)"
+        placeholder={t('studentEmailRegister')}
         placeholderTextColor="#aaa"
         value={email}
         onChangeText={setEmail}
@@ -607,7 +608,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
       
       <TextInput
         style={styles.input}
-        placeholder="password"
+        placeholder={t('passwordPlaceholder')}
         placeholderTextColor="#aaa"
         value={password}
         onChangeText={setPassword}
@@ -626,7 +627,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
               {ageConfirmed && <Text style={styles.checkmark}>✓</Text>}
             </View>
             <Text style={styles.checkboxText}>
-              18 yaşından büyük olduğumu onaylıyorum
+              {t('ageConfirmation')}
             </Text>
           </Pressable>
         </View>
@@ -640,14 +641,14 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
               {kvkkAccepted && <Text style={styles.checkmark}>✓</Text>}
             </View>
             <Text style={styles.checkboxText}>
-              KVKK aydınlatma metnini okudum ve kabul ediyorum
+              {t('kvkkAcceptance')}
             </Text>
           </Pressable>
           <Pressable 
             style={styles.detailButton}
             onPress={() => setShowKvkkModal(true)}
           >
-            <Text style={styles.detailText}>Metni Oku</Text>
+            <Text style={styles.detailText}>{t('readText')}</Text>
           </Pressable>
         </View>
 
@@ -660,14 +661,14 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
               {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
             </View>
             <Text style={styles.checkboxText}>
-              Kullanım Koşulları ve Gizlilik Politikasını kabul ediyorum
+              {t('termsAcceptance')}
             </Text>
           </Pressable>
           <Pressable 
             style={styles.detailButton}
             onPress={() => setShowTermsModal(true)}
           >
-            <Text style={styles.detailText}>Metni Oku</Text>
+            <Text style={styles.detailText}>{t('readText')}</Text>
           </Pressable>
         </View>
 
@@ -681,19 +682,19 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
         {loading ? (
           <ActivityIndicator size="small" color="#e5f253ff" />
         ) : (
-          <Text style={styles.buttonText}>create account</Text>
+          <Text style={styles.buttonText}>{t('createAccount')}</Text>
         )}
       </Pressable>
 
       <View style={styles.infoBox}>
         <Text style={styles.infoText}>
-          📧 You'll receive a verification email that you must click before you can log in. Check your spam folder too!
+          📧 {t('verificationEmailInfo')}
         </Text>
       </View>
 
       <Link href="/login" asChild>
         <Pressable>
-          <Text style={styles.link}>already have an account? log in</Text>
+          <Text style={styles.link}>{t('alreadyHaveAccount')}</Text>
         </Pressable>
       </Link>
 
@@ -706,7 +707,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>KVKK Aydınlatma Metni</Text>
+            <Text style={styles.modalTitle}>{t('kvkkText')}</Text>
             <ScrollView style={styles.modalScrollView}>
               <Text style={styles.modalText}>{kvkkFullText}</Text>
             </ScrollView>
@@ -715,7 +716,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
                 style={styles.modalCloseButton}
                 onPress={() => setShowKvkkModal(false)}
               >
-                <Text style={styles.modalCloseText}>Kapat</Text>
+                <Text style={styles.modalCloseText}>{t('close')}</Text>
               </Pressable>
               <Pressable 
                 style={styles.modalAcceptButton}
@@ -724,7 +725,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
                   setShowKvkkModal(false);
                 }}
               >
-                <Text style={styles.modalAcceptText}>Kabul Et</Text>
+                <Text style={styles.modalAcceptText}>{t('accept')}</Text>
               </Pressable>
             </View>
           </View>
@@ -740,7 +741,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Kullanım Koşulları ve Gizlilik Politikası</Text>
+            <Text style={styles.modalTitle}>{t('termsAndPrivacy')}</Text>
             <ScrollView style={styles.modalScrollView}>
               <Text style={styles.modalText}>{termsAndPrivacyText}</Text>
             </ScrollView>
@@ -749,7 +750,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
                 style={styles.modalCloseButton}
                 onPress={() => setShowTermsModal(false)}
               >
-                <Text style={styles.modalCloseText}>Kapat</Text>
+                <Text style={styles.modalCloseText}>{t('close')}</Text>
               </Pressable>
               <Pressable 
                 style={styles.modalAcceptButton}
@@ -758,7 +759,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
                   setShowTermsModal(false);
                 }}
               >
-                <Text style={styles.modalAcceptText}>Kabul Et</Text>
+                <Text style={styles.modalAcceptText}>{t('accept')}</Text>
               </Pressable>
             </View>
           </View>
