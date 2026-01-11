@@ -6,6 +6,7 @@ import { Alert, Dimensions, Image, Pressable, SafeAreaView, ScrollView, StyleShe
 import CheersImage from '../assets/cheers.png';
 import { auth } from '../firebase/firebaseConfig';
 import { useTranslation } from 'react-i18next';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 const GAP = 20;
@@ -13,7 +14,7 @@ const PADDING = 24;
 const BUTTON_WIDTH = (width - (PADDING * 2) - GAP) / 2; 
 
 export default function Home() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const router = useRouter();
   const [activeRooms, setActiveRooms] = useState([]);
   const [notifications, setNotifications] = useState([]); 
@@ -30,6 +31,34 @@ export default function Home() {
     };
     fetchUserRooms();
   }, []);
+
+  // Dil yükleme
+  useEffect(() => {
+    loadLanguage();
+  }, []);
+
+  const loadLanguage = async () => {
+    try {
+      const savedLanguage = await AsyncStorage.getItem('userLanguage');
+      if (savedLanguage) {
+        i18n.changeLanguage(savedLanguage);
+      }
+    } catch (error) {
+      console.log('Language load error:', error);
+    }
+  };
+
+  const toggleLanguage = async () => {
+    const newLanguage = i18n.language === 'en' ? 'tr' : 'en';
+    
+    try {
+      await i18n.changeLanguage(newLanguage);
+      await AsyncStorage.setItem('userLanguage', newLanguage);
+      console.log('Language changed to:', newLanguage);
+    } catch (error) {
+      console.log('Language change error:', error);
+    }
+  };
 
   const handleSignOut = async () => {
     Alert.alert(
@@ -61,9 +90,21 @@ export default function Home() {
     <SafeAreaView style={styles.container}>
       {/* TOP BAR */}
       <View style={styles.topBar}>
-        <Pressable style={styles.iconButton} onPress={handleSignOut}>
-          <Ionicons name="log-out-outline" size={24} color="#E8A4C7" />
-        </Pressable>
+        <View style={styles.topBarLeft}>
+          {/* DİL DEĞİŞTİRME BUTONU */}
+          <Pressable style={styles.languageButton} onPress={toggleLanguage}>
+            <Text style={styles.languageFlag}>
+              {i18n.language === 'en' ? '🇹🇷' : '🇬🇧'}
+            </Text>
+            <Text style={styles.languageText}>
+              {i18n.language === 'en' ? 'TR' : 'EN'}
+            </Text>
+          </Pressable>
+
+          <Pressable style={styles.iconButton} onPress={handleSignOut}>
+            <Ionicons name="log-out-outline" size={24} color="#E8A4C7" />
+          </Pressable>
+        </View>
 
         <Link href="/notifications" asChild>
           <Pressable style={styles.iconButton}>
@@ -172,6 +213,33 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     zIndex: 10,
   },
+  topBarLeft: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  
+  // DİL BUTONU STİLLERİ
+  languageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(232, 164, 199, 0.15)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(232, 164, 199, 0.3)',
+  },
+  languageFlag: {
+    fontSize: 18,
+    marginRight: 6,
+  },
+  languageText: {
+    color: '#E8A4C7',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  
   iconButton: {
     padding: 10,
     backgroundColor: 'rgba(255,255,255,0.08)',

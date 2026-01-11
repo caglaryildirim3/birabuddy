@@ -2,9 +2,9 @@ import { Link, useRouter } from 'expo-router';
 import { sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
-import { useTranslation } from 'react-i18next';
 
 export default function Login() {
   const { t } = useTranslation();
@@ -193,24 +193,26 @@ export default function Login() {
         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{t('logIn')}</Text>}
       </Pressable>
 
+      {/* ✅ HELPER LINKS - NOW VERTICAL */}
       <View style={styles.helperLinks}>
         <Pressable 
-            style={styles.forgotButton} 
-            onPress={handleForgotPassword}
-            disabled={forgotLoading}
+          style={styles.helperButton} 
+          onPress={handleForgotPassword}
+          disabled={forgotLoading}
         >
-            <Text style={styles.forgotButtonText}>
-                {forgotLoading ? t('sending') : t('forgotPassword')}
-            </Text>
+          <Text style={styles.helperText}>
+            {forgotLoading ? t('sending') : t('forgotPassword')}
+          </Text>
         </Pressable>
 
         <Pressable 
-            onPress={handleResendVerification}
-            disabled={resendLoading}
+          style={styles.helperButton}
+          onPress={handleResendVerification}
+          disabled={resendLoading}
         >
-            <Text style={styles.resendText}>
-                {resendLoading ? t('sending') : t('resendVerification')}
-            </Text>
+          <Text style={styles.helperText}>
+            {resendLoading ? t('sending') : t('resendVerification')}
+          </Text>
         </Pressable>
       </View>
 
@@ -260,7 +262,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
-    marginBottom: 20,
+    marginBottom: 16, // Reduced from 20 to 16
   },
   buttonDisabled: {
     opacity: 0.7,
@@ -270,22 +272,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  
+  /* ✅ UPDATED: Helper Links - Now Vertical */
   helperLinks: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 30,
-    paddingHorizontal: 4,
+    alignItems: 'center',
+    marginBottom: 24,
+    gap: 12, // Space between links
   },
-  forgotButtonText: {
+  helperButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  helperText: {
     color: '#bbb',
     fontSize: 14,
-  },
-  resendText: {
-    color: '#bbb',
-    fontSize: 14,
+    textDecorationLine: 'underline',
   },
   
-  /* New Divider Styles */
+  /* Divider Styles */
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -302,9 +306,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
-  /* New Register Button Styles */
+  /* Register Button Styles */
   registerButton: {
-    backgroundColor: '#1e1e1e', // Dark background for contrast
+    backgroundColor: '#1e1e1e',
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
