@@ -5,8 +5,10 @@ import { collection, onSnapshot, query, where, deleteDoc, doc } from 'firebase/f
 import { db, auth } from '../firebase/firebaseConfig';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 
 export default function MyRooms() {
+  const { t } = useTranslation();
   const [myRooms, setMyRooms] = useState([]);
   const [roomStats, setRoomStats] = useState({});
   const [refreshing, setRefreshing] = useState(false);
@@ -14,7 +16,7 @@ export default function MyRooms() {
   const router = useRouter();
 
  const formatDateTimeShort = (dateVal, timeStr) => {
-    if (!dateVal) return 'unknown';
+    if (!dateVal) return t('unknown');
     
     let dateObj;
 
@@ -26,7 +28,7 @@ export default function MyRooms() {
     else if (typeof dateVal === 'string' && timeStr) {
       dateObj = new Date(`${dateVal}T${timeStr}`);
     } else {
-      return 'unknown';
+      return t('unknown');
     }
 
     return dateObj.toLocaleString('en-US', {
@@ -152,7 +154,7 @@ export default function MyRooms() {
 
           <View style={styles.infoRow}>
             <Ionicons name="location-outline" size={14} color="#4d4c41" />
-            <Text style={styles.location} numberOfLines={1}>{item.neighborhood || 'No location'}</Text>
+            <Text style={styles.location} numberOfLines={1}>{item.neighborhood || t('noLocation')}</Text>
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="time-outline" size={14} color="#4d4c41" />
@@ -177,11 +179,11 @@ export default function MyRooms() {
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
           </Pressable>
-          <Text style={styles.title}>My Rooms</Text>
+          <Text style={styles.title}>{t('myRooms')}</Text>
           <View style={{width: 24}} />
         </View>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
+          <Text style={styles.loadingText}>{t('loading')}</Text>
         </View>
       </SafeAreaView>
     );
@@ -193,7 +195,7 @@ export default function MyRooms() {
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
         </Pressable>
-        <Text style={styles.title}>my rooms</Text>
+        <Text style={styles.title}>{t('myRooms')}</Text>
         <View style={{width: 24}} />
       </View>
 
@@ -206,9 +208,9 @@ export default function MyRooms() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#E8A4C7" />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>No rooms yet</Text>
+            <Text style={styles.emptyTitle}>{t('noRoomsYet')}</Text>
             <Pressable style={styles.createButton} onPress={() => router.push('/create-room')}>
-              <Text style={styles.createButtonText}>Create Room</Text>
+              <Text style={styles.createButtonText}>{t('createRoom')}</Text>
             </Pressable>
           </View>
         }

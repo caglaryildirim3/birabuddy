@@ -4,8 +4,10 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
+import { useTranslation } from 'react-i18next';
 
 export default function Login() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,23 +33,23 @@ export default function Login() {
     const trimmedEmail = email.trim();
     
     if (!trimmedEmail) {
-      Alert.alert('Email Required', 'Please enter your student email first.');
+      Alert.alert(t('emailRequired'), t('enterStudentEmail'));
       return;
     }
 
     if (!validateEmail(trimmedEmail)) {
-      Alert.alert('Invalid Email', 'Please enter a valid university email ending in .edu.tr or .edu');
+      Alert.alert(t('invalidEmail'), t('validUniversityEmail'));
       return;
     }
 
     setForgotLoading(true);
     try {
       await sendPasswordResetEmail(auth, trimmedEmail);
-      Alert.alert('Reset Email Sent! 📧', `Check your inbox at ${trimmedEmail}.`);
+      Alert.alert(t('resetEmailSent'), t('checkYourInbox', { email: trimmedEmail }));
     } catch (error) {
-      let msg = 'Failed to send reset email.';
-      if (error.code === 'auth/user-not-found') msg = 'No account found. Please register first.';
-      Alert.alert('Error', msg);
+      let msg = t('failedToSendReset');
+      if (error.code === 'auth/user-not-found') msg = t('noAccountFound');
+      Alert.alert(t('error'), msg);
     } finally {
       setForgotLoading(false);
     }
@@ -57,7 +59,7 @@ export default function Login() {
     const trimmedEmail = email.trim();
     
     if (!trimmedEmail || !password) {
-      Alert.alert('Missing Info', 'Enter email and password to resend verification.');
+      Alert.alert(t('missingInfo'), t('enterEmailPassword'));
       return;
     }
 
@@ -67,21 +69,21 @@ export default function Login() {
       const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
       
       if (userCredential.user.emailVerified) {
-        Alert.alert('Already Verified', 'Your email is already verified! You can log in.');
+        Alert.alert(t('alreadyVerified'), t('emailAlreadyVerified'));
       } else {
         await sendEmailVerification(userCredential.user);
         await signOut(auth);
-        Alert.alert('Sent! 📧', 'Verification email sent. Please check your inbox and spam folder.');
+        Alert.alert(t('sent'), t('verificationEmailSent'));
       }
     } catch (error) {
       console.log('Resend error:', error);
-      let msg = 'Could not send email.';
+      let msg = t('couldNotSendEmail');
       
-      if (error.code === 'auth/user-not-found') msg = 'No account exists with this email. Please Register first.';
-      else if (error.code === 'auth/wrong-password') msg = 'Wrong password.';
-      else if (error.code === 'auth/too-many-requests') msg = 'Too many attempts. Please wait a while.';
+      if (error.code === 'auth/user-not-found') msg = t('noAccountWithEmail');
+      else if (error.code === 'auth/wrong-password') msg = t('wrongPassword');
+      else if (error.code === 'auth/too-many-requests') msg = t('tooManyAttempts');
       
-      Alert.alert('Error', msg);
+      Alert.alert(t('error'), msg);
     } finally {
       setResendLoading(false);
     }
@@ -91,12 +93,12 @@ export default function Login() {
     const trimmedEmail = email.trim();
 
     if (!trimmedEmail || !password) {
-      Alert.alert('Missing Fields', 'Please enter both email and password.');
+      Alert.alert(t('missingFields'), t('enterEmailAndPassword'));
       return;
     }
 
     if (!validateEmail(trimmedEmail)) {
-      Alert.alert('Invalid Email', 'Your email must end with .edu.tr or .edu');
+      Alert.alert(t('invalidEmail'), t('yourEmailMustEnd'));
       return;
     }
 
@@ -111,11 +113,11 @@ export default function Login() {
       if (!userCredential.user.emailVerified) {
         await signOut(auth);
         Alert.alert(
-          'Email Not Verified',
-          'Please verify your email before logging in.',
+          t('emailNotVerified'),
+          t('pleaseVerifyEmail'),
           [
-            { text: 'OK' },
-            { text: 'Resend Email', onPress: handleResendVerification }
+            { text: t('ok') },
+            { text: t('resendEmail'), onPress: handleResendVerification }
           ]
         );
         return;
@@ -135,23 +137,23 @@ export default function Login() {
 
     } catch (error) {
       console.log('Login error:', error);
-      let msg = 'Login failed.';
+      let msg = t('loginFailed');
       
       // ✅ THIS IS THE UPDATE FOR BANNED USERS
       if (error.code === 'auth/user-disabled') {
-        msg = '⛔ Your account has been disabled by an administrator due to violations.';
+        msg = t('accountDisabled');
       } 
       else if (error.code === 'auth/user-not-found') {
-        msg = 'No account found. Please go to Register.';
+        msg = t('noAccountFoundRegister');
       } else if (error.code === 'auth/wrong-password') {
-        msg = 'Incorrect password.';
+        msg = t('incorrectPassword');
       } else if (error.code === 'auth/invalid-email') {
-        msg = 'Invalid email format.';
+        msg = t('invalidEmailFormat');
       } else if (error.code === 'auth/too-many-requests') {
-        msg = 'Account temporarily locked due to many failed attempts. Reset password or wait.';
+        msg = t('accountLocked');
       }
       
-      Alert.alert('Login Failed', msg);
+      Alert.alert(t('loginFailed'), msg);
     } finally {
       setLoading(false);
     }
@@ -159,11 +161,11 @@ export default function Login() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>birabuddy</Text>
+      <Text style={styles.title}>{t('appName')}</Text>
       
       <TextInput
         style={styles.input}
-        placeholder="student email (.edu or .edu.tr)"
+        placeholder={t('studentEmailPlaceholder')}
         placeholderTextColor="#aaa"
         value={email}
         onChangeText={setEmail}
@@ -174,7 +176,7 @@ export default function Login() {
       
       <TextInput
         style={styles.input}
-        placeholder="password"
+        placeholder={t('passwordPlaceholder')}
         placeholderTextColor="#aaa"
         value={password}
         onChangeText={setPassword}
@@ -188,7 +190,7 @@ export default function Login() {
         onPress={handleLogin}
         disabled={loading}
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>log in</Text>}
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{t('logIn')}</Text>}
       </Pressable>
 
       <View style={styles.helperLinks}>
@@ -198,7 +200,7 @@ export default function Login() {
             disabled={forgotLoading}
         >
             <Text style={styles.forgotButtonText}>
-                {forgotLoading ? "Sending..." : "forgot password?"}
+                {forgotLoading ? t('sending') : t('forgotPassword')}
             </Text>
         </Pressable>
 
@@ -207,21 +209,21 @@ export default function Login() {
             disabled={resendLoading}
         >
             <Text style={styles.resendText}>
-                {resendLoading ? "Sending..." : "resend verification"}
+                {resendLoading ? t('sending') : t('resendVerification')}
             </Text>
         </Pressable>
       </View>
 
       <View style={styles.divider}>
         <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>or</Text>
+        <Text style={styles.dividerText}>{t('or')}</Text>
         <View style={styles.dividerLine} />
       </View>
 
       {/* Prominent Register Button */}
       <Link href="/register" asChild>
         <Pressable style={styles.registerButton}>
-          <Text style={styles.registerButtonText}>create a new account</Text>
+          <Text style={styles.registerButtonText}>{t('createNewAccount')}</Text>
         </Pressable>
       </Link>
     </View>

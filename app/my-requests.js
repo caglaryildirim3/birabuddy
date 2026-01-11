@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet } from 'react-native';
 import { collection, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase/firebaseConfig';
+import { useTranslation } from 'react-i18next';
 
 export default function MyRequests() {
+  const { t } = useTranslation();
   const [myRequests, setMyRequests] = useState([]);
   const user = auth.currentUser;
 
@@ -38,9 +40,9 @@ export default function MyRequests() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>📮 My Join Requests</Text>
+      <Text style={styles.header}>🔮 {t('myJoinRequests')}</Text>
       {myRequests.length === 0 ? (
-        <Text style={styles.info}>You haven't sent any join requests yet.</Text>
+        <Text style={styles.info}>{t('noRequestsYet')}</Text>
       ) : (
         <FlatList
           data={myRequests}
@@ -49,9 +51,9 @@ export default function MyRequests() {
             <View style={styles.card}>
               <Text style={styles.title}>{item.title}</Text>
               <Text style={styles.detail}>📍 {item.location}</Text>
-              <Text style={styles.detail}>🕒 {item.time}</Text>
+              <Text style={styles.detail}>🕐 {item.time}</Text>
               <Text style={styles.status}>
-                {item.status === 'Approved' ? '✅ Approved' : '⏳ Pending'}
+                {item.status === 'Approved' ? `✅ ${t('approved')}` : `⏳ ${t('pending')}`}
               </Text>
             </View>
           )}

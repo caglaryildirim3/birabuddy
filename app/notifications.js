@@ -5,14 +5,16 @@ import { collection, query, where, onSnapshot, doc, updateDoc, writeBatch } from
 import { auth, db } from '../firebase/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 
 export default function Notifications() {
+  const { t } = useTranslation();
   const router = useRouter();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const formatTime = useCallback((timestamp) => {
-    if (!timestamp) return 'Just now';
+    if (!timestamp) return t('justNow');
     
     const now = new Date();
     // Handle Firestore Timestamp or generic Date object
@@ -23,11 +25,11 @@ export default function Notifications() {
     const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
     const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
 
-    if (diffInMinutes < 1) return 'Just now';
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    if (diffInHours < 24) return `${diffInHours}h ago`;
-    return `${diffInDays}d ago`;
-  }, []);
+    if (diffInMinutes < 1) return t('justNow');
+    if (diffInMinutes < 60) return t('minutesAgo', { minutes: diffInMinutes });
+    if (diffInHours < 24) return t('hoursAgo', { hours: diffInHours });
+    return t('daysAgo', { days: diffInDays });
+  }, [t]);
 
   useEffect(() => {
     let unsubscribe = null;
@@ -87,9 +89,9 @@ export default function Notifications() {
   };
 
   const clearAll = () => {
-    Alert.alert("Clear All", "Delete all notifications?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: async () => {
+    Alert.alert(t('clearAll'), t('deleteAllNotifications'), [
+      { text: t('cancel'), style: "cancel" },
+      { text: t('delete'), style: "destructive", onPress: async () => {
           const batch = writeBatch(db);
           notifications.forEach(n => batch.delete(doc(db, 'notifications', n.id)));
           await batch.commit();
@@ -123,7 +125,7 @@ export default function Notifications() {
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
           </Pressable>
-          <Text style={styles.title}>notifications</Text>
+          <Text style={styles.title}>{t('notifications')}</Text>
           <View style={{width: 24}} />
         </View>
         <View style={styles.center}>
@@ -140,7 +142,7 @@ export default function Notifications() {
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
         </Pressable>
-        <Text style={styles.title}>notifications</Text>
+        <Text style={styles.title}>{t('notifications')}</Text>
         {notifications.length > 0 ? (
           <Pressable onPress={clearAll} style={styles.clearButton}>
             <Ionicons name="trash-outline" size={22} color="#E8A4C7" />
@@ -155,8 +157,8 @@ export default function Notifications() {
         {notifications.length === 0 ? (
           <View style={styles.center}>
             <Text style={styles.emptyIcon}>🔔</Text>
-            <Text style={styles.emptyText}>no notifications yet</Text>
-            <Text style={styles.emptySubText}>yoru're all caught up!</Text>
+            <Text style={styles.emptyText}>{t('noNotificationsYet')}</Text>
+            <Text style={styles.emptySubText}>{t('allCaughtUp')}</Text>
           </View>
         ) : (
           notifications.map((n) => (
