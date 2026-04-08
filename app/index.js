@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
   
   iconButton: {
     padding: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(173, 93, 93, 0.08)',
     borderRadius: 14,
   },
   notificationBadge: {
@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 46,
     fontWeight: 'bold',
-    color: '#E8A4C7',
+    color: '#f6ffa9',
     marginBottom: -500,
   },
   subtitle: {
@@ -384,12 +384,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8A4C7',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
+    shadowColor: '',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 8,
-    borderWidth: 3,
-    borderColor: '#4A3B47',
   },
 });
