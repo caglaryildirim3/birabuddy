@@ -26,7 +26,15 @@ import {
 import { auth, db } from '../firebase/firebaseConfig';
 import { useTranslation } from 'react-i18next';
 
-const NEIGHBORHOODS = ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'];
+const CITY_NEIGHBORHOODS = {
+  istanbul: ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'],
+  ankara: ['cankaya', 'kizilay', 'tunali', 'bahcelievler', 'bilkent'],
+  izmir: ['alsancak', 'karsiyaka', 'bornova', 'guzelyali', 'bostanli'],
+  bursa: ['nilufer', 'osmangazi', 'gorkle', 'mudanya', 'fsm'],
+  antalya: ['konyaalti', 'lara', 'muratpasa', 'kepez', 'kaleici'],
+};
+const CITIES = Object.keys(CITY_NEIGHBORHOODS);
+const ALL_NEIGHBORHOODS = Object.values(CITY_NEIGHBORHOODS).flat();
 
 export default function JoinRoom() {
   const { t } = useTranslation();
@@ -41,11 +49,13 @@ export default function JoinRoom() {
 
   // --- FILTERS ---
   const [activeName, setActiveName] = useState('');
+  const [activeCities, setActiveCities] = useState([]);
   const [activeLocations, setActiveLocations] = useState([]); 
   const [activeDay, setActiveDay] = useState(null);
   const [activeTimeStart, setActiveTimeStart] = useState(null);
 
   const [tempName, setTempName] = useState('');
+  const [tempCities, setTempCities] = useState([]);
   const [tempLocations, setTempLocations] = useState([]);
   const [tempDay, setTempDay] = useState(null);
   const [tempTimeStart, setTempTimeStart] = useState(null);
@@ -102,6 +112,7 @@ export default function JoinRoom() {
 
   const openFilterModal = () => {
     setTempName(activeName);
+    setTempCities([...activeCities]);
     setTempLocations([...activeLocations]);
     setTempDay(activeDay);
     setTempTimeStart(activeTimeStart);
@@ -110,6 +121,7 @@ export default function JoinRoom() {
 
   const applyFilters = () => {
     setActiveName(tempName);
+    setActiveCities(tempCities);
     setActiveLocations(tempLocations);
     setActiveDay(tempDay);
     setActiveTimeStart(tempTimeStart);
@@ -118,10 +130,29 @@ export default function JoinRoom() {
 
   const clearFilters = () => {
     setTempName('');
+    setTempCities([]);
     setTempLocations([]);
     setTempDay(null);
     setTempTimeStart(null);
   };
+
+  const toggleCity = (city) => {
+    const selectedCities = tempCities.includes(city)
+      ? tempCities.filter((c) => c !== city)
+      : [...tempCities, city];
+
+    const allowedNeighborhoods = selectedCities.length > 0
+      ? selectedCities.flatMap((selectedCity) => CITY_NEIGHBORHOODS[selectedCity] || [])
+      : ALL_NEIGHBORHOODS;
+
+    setTempLocations((prev) => prev.filter((loc) => allowedNeighborhoods.includes(loc)));
+
+    setTempCities(selectedCities);
+  };
+
+  const visibleNeighborhoods = tempCities.length > 0
+    ? tempCities.flatMap((selectedCity) => CITY_NEIGHBORHOODS[selectedCity] || [])
+    : ALL_NEIGHBORHOODS;
 
   const toggleNeighborhood = (neighborhood) => {
     if (tempLocations.includes(neighborhood)) {
@@ -253,6 +284,12 @@ export default function JoinRoom() {
 
       if (activeName && !room.name.toLowerCase().includes(activeName.toLowerCase())) return false;
 
+      if (activeCities.length > 0) {
+        const roomCity = (room.city || '').toLowerCase();
+        const matchCity = activeCities.some((selectedCity) => roomCity === selectedCity.toLowerCase());
+        if (!matchCity) return false;
+      }
+
       if (activeLocations.length > 0) {
         const roomLoc = (room.neighborhood || room.location || '').toLowerCase();
         const match = activeLocations.some(selectedLoc => 
@@ -304,7 +341,7 @@ export default function JoinRoom() {
       }
       return 0;
     });
-  }, [rooms, participantCounts, userParticipations, activeName, activeLocations, activeDay, activeTimeStart]);
+  }, [rooms, participantCounts, userParticipations, activeName, activeCities, activeLocations, activeDay, activeTimeStart]);
 
   const handleRequest = async (roomId, requests = []) => {
     if (!currentUser) return;
@@ -338,7 +375,9 @@ export default function JoinRoom() {
 
           <View style={styles.infoRow}>
             <Ionicons name="location-outline" size={14} color="#4d4c41" />
-            <Text style={styles.location} numberOfLines={1}>{item.neighborhood || item.location}</Text>
+            <Text style={styles.location} numberOfLines={1}>
+              {item.city ? `${item.neighborhood || item.location}, ${item.city}` : (item.neighborhood || item.location)}
+            </Text>
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="time-outline" size={14} color="#4d4c41" />
@@ -423,9 +462,26 @@ export default function JoinRoom() {
                 value={tempName}
                 onChangeText={setTempName}
               />
+              <Text style={styles.filterLabel}>{t('cities')}</Text>
+              <View style={styles.wrapContainer}>
+                {CITIES.map((city) => {
+                  const isSelected = tempCities.includes(city);
+                  return (
+                    <Pressable
+                      key={city}
+                      style={[styles.chip, isSelected && styles.chipActive]}
+                      onPress={() => toggleCity(city)}
+                    >
+                      <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
+                        {city}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
               <Text style={styles.filterLabel}>{t('neighborhoods')}</Text>
               <View style={styles.wrapContainer}>
-                {NEIGHBORHOODS.map((hood) => {
+                {visibleNeighborhoods.map((hood) => {
                   const isSelected = tempLocations.includes(hood);
                   return (
                     <Pressable
@@ -499,6 +555,7 @@ export default function JoinRoom() {
           <Pressable 
              onPress={() => {
                setActiveName('');
+               setActiveCities([]);
                setActiveLocations([]);
                setActiveDay(null);
                setActiveTimeStart(null);

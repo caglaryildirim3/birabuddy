@@ -203,7 +203,7 @@ export default function Home() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4A3B47',
+    backgroundColor: '#8a6477ff',
   },
   topBar: {
     flexDirection: 'row',
@@ -276,14 +276,14 @@ const styles = StyleSheet.create({
 
   headerSection: {
     alignItems: 'center',
-    marginTop: 20, 
-    marginBottom: 20,
+    marginTop: 60, 
+    marginBottom: 60,
   },
   title: {
     fontSize: 46,
     fontWeight: 'bold',
     color: '#E8A4C7',
-    marginBottom: 5,
+    marginBottom: -500,
   },
   subtitle: {
     fontSize: 16,
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
   },
   cheers: {
     width: 100,
-    height: 80,
+    height: 70,
     resizeMode: 'contain',
     opacity: 0.8,
   },

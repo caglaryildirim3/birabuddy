@@ -30,6 +30,7 @@
   "roomNameRequired": "Oda adı gerekli.",
   "nameTooLong": "İsim Çok Uzun",
   "roomNameLimit": "Oda adı {{limit}} karakter veya daha az olmalı.",
+  "selectCity": "Lütfen bir şehir seçin.",
   "selectNeighborhood": "Lütfen bir semt seçin.",
   "barNameRequired": "Bar adı gerekli.",
   "barNameTooLong": "Bar Adı Çok Uzun",
@@ -49,6 +50,7 @@
   "roomNamePlaceholder": "oda adı",
   "descriptionPlaceholder": "açıklama (opsiyonel)",
   "whereToMeet": "Nerede buluşalım?",
+  "city": "şehir:",
   "neighborhood": "semt:",
   "barName": "bar adı:",
   "barPlaceholder": "hangi bar veya mekan?",
@@ -157,6 +159,7 @@
   
   "noRoomsYet": "Henüz oda yok",
   "createRoom": "Oda Oluştur",
+ 
   
   "notifications": "bildirimler",
   "justNow": "Şimdi",
@@ -205,6 +208,7 @@
   
   "joinAMeetup": "bir buluşmaya katıl",
   "filterRooms": "Odaları Filtrele",
+  "cities": "Şehirler",
   "roomName": "Oda Adı",
   "searchByName": "İsme göre ara...",
   "neighborhoods": "Semtler",

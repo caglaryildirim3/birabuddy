@@ -208,9 +208,9 @@ export default function MyRooms() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#E8A4C7" />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>{t('noRoomsYet')}</Text>
+            <Text style={styles.emptyTitle}>{t('no rooms yet')}</Text>
             <Pressable style={styles.createButton} onPress={() => router.push('/create-room')}>
-              <Text style={styles.createButtonText}>{t('createRoom')}</Text>
+              <Text style={styles.createButtonText}>{t('create a room')}</Text>
             </Pressable>
           </View>
         }

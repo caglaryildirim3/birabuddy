@@ -30,6 +30,7 @@
   "roomNameRequired": "Room name is required.",
   "nameTooLong": "Name Too Long",
   "roomNameLimit": "Room name must be {{limit}} characters or less.",
+  "selectCity": "Please select a city.",
   "selectNeighborhood": "Please select a neighborhood.",
   "barNameRequired": "Bar name is required.",
   "barNameTooLong": "Bar Name Too Long",
@@ -49,6 +50,7 @@
   "roomNamePlaceholder": "room name",
   "descriptionPlaceholder": "description (optional)",
   "whereToMeet": "Where to meet?",
+  "city": "city:",
   "neighborhood": "neighborhood:",
   "barName": "bar name:",
   "barPlaceholder": "which bar or place?",
@@ -205,6 +207,7 @@
   
   "joinAMeetup": "join a meetup",
   "filterRooms": "Filter Rooms",
+  "cities": "Cities",
   "roomName": "Room Name",
   "searchByName": "Search by name...",
   "neighborhoods": "Neighborhoods",

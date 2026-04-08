@@ -23,6 +23,7 @@ export default function CreateRoom() {
   const { t } = useTranslation();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [city, setCity] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
   const [barName, setBarName] = useState('');
   const [maxPeople, setMaxPeople] = useState('');
@@ -41,7 +42,15 @@ export default function CreateRoom() {
   const DESCRIPTION_LIMIT = 200;
   const BAR_NAME_LIMIT = 50;
 
-  const neighborhoods = ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'];
+  const neighborhoodsByCity = {
+    istanbul: ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'],
+    ankara: ['cankaya', 'kizilay', 'tunali', 'bahcelievler', 'bilkent'],
+    izmir: ['alsancak', 'karsiyaka', 'bornova', 'guzelyali', 'bostanli'],
+    bursa: ['nilufer', 'osmangazi', 'gorkle', 'mudanya', 'fsm'],
+    antalya: ['konyaalti', 'lara', 'muratpasa', 'kepez', 'kaleici'],
+  };
+  const cities = Object.keys(neighborhoodsByCity);
+  const neighborhoods = city ? neighborhoodsByCity[city] : [];
 
   const today = new Date();
   const maxDate = new Date();
@@ -76,6 +85,11 @@ export default function CreateRoom() {
     
     if (name.trim().length > NAME_LIMIT) {
       Alert.alert(t('nameTooLong'), t('roomNameLimit', { limit: NAME_LIMIT }));
+      return;
+    }
+
+    if (!city) {
+      Alert.alert(t('missingField'), t('selectCity'));
       return;
     }
 
@@ -146,9 +160,10 @@ export default function CreateRoom() {
       const roomRef = await addDoc(collection(db, 'rooms'), {
         name: name.trim(),
         description: description.trim(),
+        city: city,
         neighborhood: neighborhood,
         barName: barName.trim(),
-        fullLocation: `${barName.trim()}, ${neighborhood}`,
+        fullLocation: `${barName.trim()}, ${neighborhood}, ${city}`,
         date: Timestamp.fromDate(roomDateTime), 
         time: formattedTime,
         maxParticipants: max,
@@ -276,6 +291,36 @@ export default function CreateRoom() {
 
           <Text style={styles.sectionTitle}>📍 {t('whereToMeet')}</Text>
           
+          <View style={styles.inputContainer}>
+            <Text style={styles.fieldLabel}>{t('city')}</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.neighborhoodContainer}
+            >
+              {cities.map((cityOption, index) => (
+                <Pressable
+                  key={index}
+                  style={[
+                    styles.neighborhoodButton,
+                    city === cityOption && styles.neighborhoodButtonSelected
+                  ]}
+                  onPress={() => {
+                    setCity(cityOption);
+                    setNeighborhood('');
+                  }}
+                >
+                  <Text style={[
+                    styles.neighborhoodButtonText,
+                    city === cityOption && styles.neighborhoodButtonTextSelected
+                  ]}>
+                    {cityOption}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+
           <View style={styles.inputContainer}>
             <Text style={styles.fieldLabel}>{t('neighborhood')}</Text>
             <ScrollView 

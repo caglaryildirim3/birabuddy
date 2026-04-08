@@ -167,7 +167,7 @@ export default function ActiveRooms() {
               style={styles.browseButton}
               onPress={() => router.push('/room-list')}
             >
-              <Text style={styles.browseButtonText}>{t('browseRooms')}</Text>
+              <Text style={styles.browseButtonText}>{t('browse rooms')}</Text>
             </Pressable>
           </View>
         ) : (
