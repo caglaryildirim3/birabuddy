@@ -18,6 +18,7 @@ import { signOut } from 'firebase/auth';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import BeerColors from '../constants/BeerColors';
 
 export default function MyProfile() {
   const { t } = useTranslation();
@@ -247,7 +248,7 @@ export default function MyProfile() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#E8A4C7" />
+          <ActivityIndicator size="large" color={BeerColors.textPrimary} />
           <Text style={styles.loadingText}>{t('loadingProfile')}</Text>
         </View>
       </SafeAreaView>
@@ -259,7 +260,7 @@ export default function MyProfile() {
       {/* Header with Back Button */}
       <View style={styles.headerRow}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={28} color="#E8A4C7" />
+          <Ionicons name="arrow-back" size={28} color={BeerColors.textPrimary} />
         </Pressable>
         <Text style={styles.headerTitle}></Text>
         <View style={{width: 28}} />
@@ -334,7 +335,7 @@ export default function MyProfile() {
             value={age}
             onChangeText={setAge}
             placeholder={t('enterYourAge')}
-            placeholderTextColor="#999"
+            placeholderTextColor={BeerColors.textMuted}
             keyboardType="numeric"
             maxLength={3}
           />
@@ -345,7 +346,7 @@ export default function MyProfile() {
             value={major}
             onChangeText={setMajor}
             placeholder={t('majorExample')}
-            placeholderTextColor="#999"
+            placeholderTextColor={BeerColors.textMuted}
             maxLength={50}
           />
           <Text style={styles.charCount}>{major.length}/50</Text>
@@ -367,7 +368,7 @@ export default function MyProfile() {
             disabled={updating}
           >
             {updating ? (
-              <ActivityIndicator size="small" color="#4A3B47" />
+              <ActivityIndicator size="small" color={BeerColors.textPrimary} />
             ) : (
               <Text style={styles.updateButtonText}>🍻 {t('saveChanges')}</Text>
             )}
@@ -399,7 +400,7 @@ export default function MyProfile() {
               value={tempInstagram}
               onChangeText={setTempInstagram}
               placeholder={t('enterUsername')}
-              placeholderTextColor="#999"
+              placeholderTextColor={BeerColors.textMuted}
               autoCapitalize="none"
               autoCorrect={false}
               maxLength={30}
@@ -410,7 +411,7 @@ export default function MyProfile() {
                 <Text style={styles.modalCancelText}>{t('cancel')}</Text>
               </Pressable>
               <Pressable style={[styles.modalSaveButton, updatingInstagram && styles.buttonDisabled]} onPress={saveInstagram} disabled={updatingInstagram}>
-                {updatingInstagram ? <ActivityIndicator size="small" color="#4A3B47" /> : <Text style={styles.modalSaveText}>{t('save')}</Text>}
+                {updatingInstagram ? <ActivityIndicator size="small" color={BeerColors.textPrimary} /> : <Text style={styles.modalSaveText}>{t('save')}</Text>}
               </Pressable>
             </View>
           </View>
@@ -423,7 +424,7 @@ export default function MyProfile() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
   },
   // Header styles
   headerRow: {
@@ -439,7 +440,7 @@ const styles = StyleSheet.create({
     marginLeft: -4,
   },
   headerTitle: {
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     fontSize: 18,
     fontWeight: '600',
   },
@@ -455,14 +456,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     marginTop: 10,
     fontSize: 16,
   },
   pageTitle: {
     fontSize: 34,
     fontWeight: 'bold',
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     textAlign: 'center',
     marginBottom: 30,
     letterSpacing: 1,
@@ -470,7 +471,7 @@ const styles = StyleSheet.create({
   profileSection: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#5A4B5C',
+    backgroundColor: BeerColors.panel,
     padding: 24,
     borderRadius: 20,
     marginBottom: 20,
@@ -480,7 +481,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
   },
   avatarContainer: {
     alignItems: 'center',
@@ -490,7 +491,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#E8A4C7',
+    backgroundColor: BeerColors.panelElevated,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -499,15 +500,15 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
     borderWidth: 3,
-    borderColor: '#E8D5DA',
+    borderColor: BeerColors.borderSoft,
   },
   avatarText: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#4A3B47',
+    color: BeerColors.textPrimary,
   },
   ageTag: {
-    backgroundColor: '#C97BA3',
+    backgroundColor: BeerColors.panelSoft,
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
@@ -519,7 +520,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   ageTagText: {
-    color: '#fff',
+    color: BeerColors.textPrimary,
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -527,31 +528,31 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   university: {
-    color: '#E1B604',
+    color: BeerColors.textSecondary,
     fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 8,
   },
   email: {
-    color: '#E8D5DA',
+    color: BeerColors.textSecondary,
     fontSize: 14,
     marginBottom: 8,
     opacity: 0.8,
   },
   major: {
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     fontSize: 16,
     marginBottom: 6,
     fontWeight: '600',
   },
   favDrink: {
-    color: '#C97BA3',
+    color: BeerColors.textSecondary,
     fontSize: 16,
     marginBottom: 6,
     fontWeight: '600',
@@ -562,13 +563,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   instagram: {
-    color: '#A3C7E8',
+    color: BeerColors.iconPrimary,
     fontSize: 15,
     textDecorationLine: 'underline',
   },
   editInstagramButton: {
     marginLeft: 8,
-    backgroundColor: '#7A6B7D',
+    backgroundColor: BeerColors.panelElevated,
     width: 28,
     height: 28,
     borderRadius: 14,
@@ -584,7 +585,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   joinDate: {
-    color: '#E8D5DA',
+    color: BeerColors.textSecondary,
     fontSize: 12,
     opacity: 0.7,
   },
@@ -595,7 +596,7 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
-    backgroundColor: '#5A4B5C',
+    backgroundColor: BeerColors.panel,
     padding: 24,
     borderRadius: 16,
     alignItems: 'center',
@@ -605,17 +606,17 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 6,
     borderWidth: 1,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
   },
   statNumber: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     marginBottom: 8,
   },
   statLabel: {
     fontSize: 14,
-    color: '#E8D5DA',
+    color: BeerColors.textSecondary,
     opacity: 0.8,
     textAlign: 'center',
   },
@@ -624,24 +625,24 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 24,
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     fontWeight: 'bold',
     marginBottom: 20,
     letterSpacing: 0.5,
   },
   label: {
     fontSize: 16,
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     marginBottom: 10,
     fontWeight: '600',
   },
   input: {
-    backgroundColor: '#5A4B5C',
-    color: '#E8D5DA',
+    backgroundColor: BeerColors.panel,
+    color: BeerColors.textPrimary,
     padding: 18,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
     fontSize: 16,
     marginBottom: 6,
     shadowColor: '#000',
@@ -651,14 +652,14 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   charCount: {
-    color: '#E8D5DA',
+    color: BeerColors.textSecondary,
     fontSize: 12,
     opacity: 0.6,
     alignSelf: 'flex-end',
     marginBottom: 6,
   },
   updateButton: {
-    backgroundColor: '#E8A4C7',
+    backgroundColor: BeerColors.panelElevated,
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
@@ -673,7 +674,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   updateButtonText: {
-    color: '#4A3B47',
+    color: BeerColors.textPrimary,
     fontWeight: 'bold',
     fontSize: 18,
     letterSpacing: 0.5,
@@ -686,12 +687,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   signOutButton: {
-    backgroundColor: '#5A4B5C',
+    backgroundColor: BeerColors.panel,
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
@@ -699,12 +700,12 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   signOutButtonText: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontWeight: 'bold',
     fontSize: 14,
   },
   deleteButton: {
-    backgroundColor: '#B85A6E',
+    backgroundColor: BeerColors.danger,
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderRadius: 10,
@@ -722,7 +723,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 10,
     fontWeight: '300',
-    color: '#d7d7baff',
+    color: BeerColors.textMuted,
     bottom: 5,
     fontStyle: 'italic',
   },
@@ -734,13 +735,13 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContainer: {
-    backgroundColor: '#5A4B5C',
+    backgroundColor: BeerColors.panel,
     borderRadius: 20,
     padding: 24,
     width: '100%',
     maxWidth: 400,
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
@@ -754,7 +755,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: {
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     fontSize: 22,
     fontWeight: 'bold',
   },
@@ -762,33 +763,33 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#7A6B7D',
+    backgroundColor: BeerColors.panelElevated,
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalCloseText: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 18,
     fontWeight: '600',
   },
   modalLabel: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 10,
   },
   modalInput: {
-    backgroundColor: '#4A3B47',
-    color: '#E8D5DA',
+    backgroundColor: BeerColors.panelElevated,
+    color: BeerColors.textPrimary,
     padding: 16,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
     fontSize: 16,
     marginBottom: 8,
   },
   modalHelpText: {
-    color: '#E8D5DA',
+    color: BeerColors.textSecondary,
     fontSize: 12,
     opacity: 0.7,
     fontStyle: 'italic',
@@ -800,25 +801,25 @@ const styles = StyleSheet.create({
   },
   modalCancelButton: {
     flex: 1,
-    backgroundColor: '#7A6B7D',
+    backgroundColor: BeerColors.panelElevated,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
   },
   modalCancelText: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
   },
   modalSaveButton: {
     flex: 1,
-    backgroundColor: '#E8A4C7',
+    backgroundColor: BeerColors.panelSoft,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
   },
   modalSaveText: {
-    color: '#4A3B47',
+    color: BeerColors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },

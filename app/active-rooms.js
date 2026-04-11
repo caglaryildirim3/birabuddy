@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
 import { useTranslation } from 'react-i18next';
+import BeerColors from '../constants/BeerColors';
 
 const formatDateTimeShort = (dateVal, timeStr) => {
   if (!dateVal) return 'unknown';
@@ -132,7 +133,7 @@ export default function ActiveRooms() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+            <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
           </Pressable>
           <Text style={styles.title}>{t('activeRooms')}</Text>
           <View style={{width: 24}} />
@@ -148,7 +149,7 @@ export default function ActiveRooms() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+          <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
         </Pressable>
         <Text style={styles.title}>{t('activeRooms')}</Text>
         <View style={{width: 24}} />
@@ -185,18 +186,18 @@ export default function ActiveRooms() {
                 ) : null}
 
                 <View style={styles.infoRow}>
-                  <Ionicons name="location-outline" size={14} color="#4d4c41" />
+                  <Ionicons name="location-outline" size={14} color={BeerColors.iconPrimary} />
                   <Text style={styles.location} numberOfLines={1}>{room.neighborhood || t('noLocation')}</Text>
                 </View>
                 <View style={styles.infoRow}>
-                  <Ionicons name="time-outline" size={14} color="#4d4c41" />
+                  <Ionicons name="time-outline" size={14} color={BeerColors.iconPrimary} />
                   <Text style={styles.time}>{formatDateTimeShort(room.date, room.time)}</Text>
                 </View>
               </View>
 
               <View style={styles.cardRight}>
                 <View style={styles.countContainer}>
-                  <Ionicons name="people" size={16} color="#3A6A6F" />
+                  <Ionicons name="people" size={16} color={BeerColors.iconPrimary} />
                   <Text style={styles.peopleCount}>
                      {room.maxParticipants} {t('max')}
                   </Text>
@@ -223,7 +224,7 @@ export default function ActiveRooms() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
   },
   header: {
     flexDirection: 'row',
@@ -232,17 +233,17 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 10,
     paddingHorizontal: 20,
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
   },
   backButton: { padding: 4 },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#E8A4C7' },
+  title: { fontSize: 24, fontWeight: 'bold', color: BeerColors.textPrimary },
   scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: '#E8A4C7', fontSize: 16 },
+  loadingText: { color: BeerColors.textPrimary, fontSize: 16 },
   
   card: {
-    backgroundColor: '#E8D5DA',
+    backgroundColor: BeerColors.panel,
     marginHorizontal: 20,
     marginBottom: 12,
     borderRadius: 12,
@@ -250,7 +251,7 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#3A6A6F',
+    borderColor: BeerColors.borderSoft,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -269,12 +270,12 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#4d4c41',
+    color: BeerColors.textPrimary,
     marginBottom: 2,
   },
   description: {
     fontSize: 13,
-    color: '#666',
+    color: BeerColors.textSecondary,
     marginBottom: 6,
     fontStyle: 'italic',
   },
@@ -285,14 +286,14 @@ const styles = StyleSheet.create({
   },
   location: {
     fontSize: 13,
-    color: '#4d4c41',
+    color: BeerColors.textPrimary,
     marginLeft: 4,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
   time: {
     fontSize: 13,
-    color: '#666',
+    color: BeerColors.textSecondary,
     marginLeft: 4,
   },
   countContainer: {
@@ -303,17 +304,17 @@ const styles = StyleSheet.create({
   peopleCount: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#3A6A6F',
+    color: BeerColors.textPrimary,
     marginLeft: 4,
   },
   leaveButton: {
-    backgroundColor: '#C62828',
+    backgroundColor: BeerColors.danger,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 20,
   },
   leaveButtonText: {
-    color: '#fff',
+    color: BeerColors.white,
     fontWeight: 'bold',
     fontSize: 12,
   },
@@ -325,12 +326,12 @@ const styles = StyleSheet.create({
     paddingTop: 100,
   },
   emptyIcon: { fontSize: 60, marginBottom: 20 },
-  emptyTitle: { fontSize: 22, fontWeight: 'bold', color: '#E8A4C7', marginBottom: 10 },
+  emptyTitle: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary, marginBottom: 10 },
   browseButton: {
-    backgroundColor: '#E8A4C7',
+    backgroundColor: BeerColors.panelElevated,
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 12,
   },
-  browseButtonText: { color: '#4A3B47', fontSize: 16, fontWeight: 'bold' },
+  browseButtonText: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: 'bold' },
 });

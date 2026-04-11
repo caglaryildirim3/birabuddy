@@ -36,6 +36,7 @@ import {
 import UserProfile from '../../components/UserProfile';
 import { auth, db } from '../../firebase/firebaseConfig';
 import { useButtonDelay } from '../../hooks/useButtonDelay';
+import BeerColors from '../../constants/BeerColors';
 
 export default function RoomDetails() {
   const { id } = useLocalSearchParams();
@@ -429,7 +430,7 @@ export default function RoomDetails() {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <View style={styles.loadingCard}>
-          <ActivityIndicator size="large" color="#E8A4C7" />
+          <ActivityIndicator size="large" color={BeerColors.textPrimary} />
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
       </SafeAreaView>
@@ -447,7 +448,7 @@ export default function RoomDetails() {
           <View style={styles.headerContent}>
             <View style={styles.headerLeft}>
               <Pressable style={styles.backButton} onPress={() => router.back()}>
-                <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+                <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
               </Pressable>
               <View style={styles.titleContainer}>
                 <Text style={styles.title} numberOfLines={1}>{room?.name || 'Untitled Room'}</Text>
@@ -460,12 +461,12 @@ export default function RoomDetails() {
                   style={[styles.chatToggleButton, showChat && styles.chatToggleButtonActive]} 
                   onPress={() => setShowChat(!showChat)}
                 >
-                  <Ionicons name={showChat ? "list" : "chatbubbles"} size={20} color={showChat ? "#4A3B47" : "#E8A4C7"} />
+                  <Ionicons name={showChat ? "list" : "chatbubbles"} size={20} color={BeerColors.textPrimary} />
                 </Pressable>
               )}
               {isCreator && (
                 <Pressable style={styles.deleteButton} onPress={handleDeleteRoom}>
-                   <Ionicons name="trash-outline" size={20} color="#E8A4C7" />
+                   <Ionicons name="trash-outline" size={20} color={BeerColors.textPrimary} />
                 </Pressable>
               )}
             </View>
@@ -479,7 +480,7 @@ export default function RoomDetails() {
           */}
           <KeyboardAvoidingView 
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-            style={{flex: 1, backgroundColor: '#4A3B47'}}
+            style={{flex: 1, backgroundColor: BeerColors.background}}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0} 
           >
             <View style={styles.chatContainer}>
@@ -487,7 +488,7 @@ export default function RoomDetails() {
                 <View style={styles.chatHeaderContent}>
                   <Text style={styles.chatTitle}>room chat 💬</Text>
                   <Pressable style={styles.closeChatButton} onPress={() => setShowChat(false)}>
-                     <Ionicons name="close" size={24} color="#E8A4C7" />
+                     <Ionicons name="close" size={24} color={BeerColors.textPrimary} />
                   </Pressable>
                 </View>
               </View>
@@ -508,7 +509,7 @@ export default function RoomDetails() {
                   <TextInput
                     style={[styles.input, isDisabled && styles.inputDisabled]}
                     placeholder="Type your message..."
-                    placeholderTextColor="#999"
+                    placeholderTextColor={BeerColors.textMuted}
                     value={message}
                     onChangeText={setMessage}
                     multiline={false}
@@ -520,7 +521,7 @@ export default function RoomDetails() {
                     onPress={handleSendPress}
                     disabled={message.trim() === '' || isDisabled}
                   >
-                     <Ionicons name="send" size={20} color={isDisabled ? "#999" : "#E1B604"} />
+                     <Ionicons name="send" size={20} color={isDisabled ? BeerColors.textMuted : BeerColors.textPrimary} />
                   </Pressable>
                 </View>
               </View>
@@ -545,7 +546,7 @@ export default function RoomDetails() {
             
             <View style={styles.infoGrid}>
               <View style={styles.infoItem}>
-                 <Ionicons name="location-outline" size={20} color="#E1B604" style={{marginRight:10}} />
+                 <Ionicons name="location-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Location</Text>
                   <Text style={styles.infoValue}>{getDisplayLocation()}</Text>
@@ -553,7 +554,7 @@ export default function RoomDetails() {
               </View>
 
               <View style={styles.infoItem}>
-                 <Ionicons name="calendar-outline" size={20} color="#E1B604" style={{marginRight:10}} />
+                 <Ionicons name="calendar-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Date</Text>
                   <Text style={styles.infoValue}>{formattedDate}</Text>
@@ -561,7 +562,7 @@ export default function RoomDetails() {
               </View>
               
               <View style={styles.infoItem}>
-                <Ionicons name="time-outline" size={20} color="#E1B604" style={{marginRight:10}} />
+                <Ionicons name="time-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Time</Text>
                   <Text style={styles.infoValue}>{formattedTime}</Text>
@@ -569,7 +570,7 @@ export default function RoomDetails() {
               </View>
               
               <View style={styles.infoItem}>
-                <Ionicons name="people-outline" size={20} color="#E1B604" style={{marginRight:10}} />
+                <Ionicons name="people-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoLabel}>Capacity</Text>
                   <Text style={styles.infoValue}>{participants.length}/{room?.maxParticipants || 0}</Text>
@@ -578,7 +579,7 @@ export default function RoomDetails() {
 
               {room?.description && (
                 <View style={styles.infoItem}>
-                   <Ionicons name="document-text-outline" size={20} color="#E1B604" style={{marginRight:10}} />
+                   <Ionicons name="document-text-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
                   <View style={styles.infoContent}>
                     <Text style={styles.infoLabel}>Description</Text>
                     <Text style={styles.infoValue}>{room.description}</Text>
@@ -614,7 +615,7 @@ export default function RoomDetails() {
                             </Text>
                             {isParticipant && p.uid !== auth.currentUser?.uid && (
                               <Pressable style={styles.reportButton} onPress={() => handleReportUser(p)}>
-                                <Ionicons name="alert-circle-outline" size={24} color="#C62828" />
+                                <Ionicons name="alert-circle-outline" size={24} color={BeerColors.danger} />
                               </Pressable>
                             )}
                           </View>
@@ -679,10 +680,10 @@ export default function RoomDetails() {
                             disabled={isRoomFull}
                             onPress={() => handleApprove(r)}
                         >
-                          <Ionicons name="checkmark" size={20} color="#fff" />
+                          <Ionicons name="checkmark" size={20} color={BeerColors.white} />
                         </Pressable>
                         <Pressable style={styles.declineButton} onPress={() => handleDecline(r)}>
-                          <Ionicons name="close" size={20} color="#fff" />
+                          <Ionicons name="close" size={20} color={BeerColors.white} />
                         </Pressable>
                       </View>
                     </View>
@@ -743,7 +744,7 @@ export default function RoomDetails() {
                         setReportReason(''); 
                       }}
                     >
-                      <Ionicons name="close" size={20} color="#E8D5DA" />
+                      <Ionicons name="close" size={20} color={BeerColors.textPrimary} />
                     </Pressable>
                   </View>
                   
@@ -754,7 +755,7 @@ export default function RoomDetails() {
                   <TextInput
                     style={styles.reportReasonInput}
                     placeholder="Describe the issue..."
-                    placeholderTextColor="#999"
+                    placeholderTextColor={BeerColors.textMuted}
                     value={reportReason}
                     onChangeText={setReportReason}
                     multiline={true}
@@ -799,40 +800,40 @@ export default function RoomDetails() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#4A3B47' },
-  loadingContainer: { flex: 1, backgroundColor: '#4A3B47', justifyContent: 'center', alignItems: 'center' },
-  loadingCard: { backgroundColor: '#5A4B5C', padding: 32, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#7A6B7D' },
-  loadingText: { color: '#E8A4C7', fontSize: 16, fontWeight: '500', marginTop: 16 },
-  header: { backgroundColor: '#4A3B47', borderBottomWidth: 1, borderBottomColor: '#5A4B5C', paddingTop: Platform.OS === 'ios' ? 0 : 10 },
+  container: { flex: 1, backgroundColor: BeerColors.background },
+  loadingContainer: { flex: 1, backgroundColor: BeerColors.background, justifyContent: 'center', alignItems: 'center' },
+  loadingCard: { backgroundColor: BeerColors.panel, padding: 32, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
+  loadingText: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: '500', marginTop: 16 },
+  header: { backgroundColor: BeerColors.background, borderBottomWidth: 1, borderBottomColor: BeerColors.borderSoft, paddingTop: Platform.OS === 'ios' ? 0 : 10 },
   headerContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
   headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   backButton: { padding: 8, marginRight: 12 },
   titleContainer: { flex: 1, marginRight: 12 },
-  title: { color: '#E8A4C7', fontSize: 20, fontWeight: 'bold', marginBottom: 2 },
-  subtitle: { color: '#E8D5DA', fontSize: 14, fontWeight: '400' },
+  title: { color: BeerColors.textPrimary, fontSize: 20, fontWeight: 'bold', marginBottom: 2 },
+  subtitle: { color: BeerColors.textSecondary, fontSize: 14, fontWeight: '400' },
   headerRight: { flexDirection: 'row', gap: 8 },
-  chatToggleButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  chatToggleButtonActive: { backgroundColor: '#E8A4C7' },
-  deleteButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
+  chatToggleButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: BeerColors.panelSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
+  chatToggleButtonActive: { backgroundColor: BeerColors.panelElevated },
+  deleteButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: BeerColors.panelSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
   scrollView: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingBottom: 100 },
-  infoCard: { backgroundColor: '#E8D5DA', marginHorizontal: 20, marginTop: 20, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#3A6A6F', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 3 },
+  infoCard: { backgroundColor: BeerColors.panel, marginHorizontal: 20, marginTop: 20, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: BeerColors.borderSoft, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 3 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  cardTitle: { color: '#4d4c41', fontSize: 20, fontWeight: 'bold' },
-  creatorBadge: { backgroundColor: '#E1B604', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  creatorBadgeText: { color: '#E8D5DA', fontSize: 12, fontWeight: 'bold' },
+  cardTitle: { color: BeerColors.textPrimary, fontSize: 20, fontWeight: 'bold' },
+  creatorBadge: { backgroundColor: BeerColors.panelElevated, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  creatorBadgeText: { color: BeerColors.textPrimary, fontSize: 12, fontWeight: 'bold' },
   infoGrid: { gap: 16 },
   infoItem: { flexDirection: 'row', alignItems: 'flex-start' },
   infoContent: { flex: 1 },
-  infoLabel: { color: '#b08f0bff', fontSize: 14, fontWeight: '600', marginBottom: 2 },
-  infoValue: { color: '#4d4c41', fontSize: 16, fontWeight: '400', lineHeight: 22 },
+  infoLabel: { color: BeerColors.textSecondary, fontSize: 14, fontWeight: '600', marginBottom: 2 },
+  infoValue: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: '400', lineHeight: 22 },
   section: { marginHorizontal: 20, marginTop: 24 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  sectionTitle: { color: '#E8A4C7', fontSize: 18, fontWeight: 'bold' },
-  participantCount: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  participantCountText: { color: '#E8D5DA', fontSize: 14, fontWeight: '600' },
-  requestCount: { backgroundColor: '#E1B604', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  requestCountText: { color: '#E1B604', fontSize: 14, fontWeight: 'bold' },
+  sectionTitle: { color: BeerColors.textPrimary, fontSize: 18, fontWeight: 'bold' },
+  participantCount: { backgroundColor: BeerColors.panelSoft, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  participantCountText: { color: BeerColors.textPrimary, fontSize: 14, fontWeight: '600' },
+  requestCount: { backgroundColor: BeerColors.panelSoft, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  requestCountText: { color: BeerColors.textPrimary, fontSize: 14, fontWeight: 'bold' },
   participantsList: { gap: 12 },
   participantCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#3A6A6F' },
   firstParticipantCard: { borderWidth: 2, borderColor: '#E1B604' },
@@ -871,32 +872,32 @@ const styles = StyleSheet.create({
   approveButton: { backgroundColor: '#E1B604', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   approveButtonDisabled: { backgroundColor: '#999', opacity: 0.6 },
   declineButton: { backgroundColor: '#C62828', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
-  chatContainer: { flex: 1, backgroundColor: '#4A3B47' },
-  chatHeader: { backgroundColor: '#5A4B5C', paddingTop: Platform.OS === 'ios' ? 20 : 10, borderBottomWidth: 1, borderBottomColor: '#7A6B7D' },
+  chatContainer: { flex: 1, backgroundColor: BeerColors.background },
+  chatHeader: { backgroundColor: BeerColors.panel, paddingTop: Platform.OS === 'ios' ? 20 : 10, borderBottomWidth: 1, borderBottomColor: BeerColors.borderSoft },
   chatHeaderContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
-  chatTitle: { color: '#E8A4C7', fontSize: 18, fontWeight: 'bold' },
+  chatTitle: { color: BeerColors.textPrimary, fontSize: 18, fontWeight: 'bold' },
   closeChatButton: { padding: 8 },
-  messagesFlatList: { flex: 1, backgroundColor: '#4A3B47' },
+  messagesFlatList: { flex: 1, backgroundColor: BeerColors.background },
   flatListContent: { paddingVertical: 20, paddingHorizontal: 16 },
   messageContainer: { marginBottom: 12 },
   myMessage: { alignItems: 'flex-end' },
   otherMessage: { alignItems: 'flex-start' },
   messageBubble: { maxWidth: '80%', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20 },
-  myMessageBubble: { backgroundColor: '#E8D5DA', borderBottomRightRadius: 4 },
-  otherMessageBubble: { backgroundColor: '#5A4B5C', borderBottomLeftRadius: 4 },
-  senderName: { color: '#E8A4C7', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
+  myMessageBubble: { backgroundColor: BeerColors.panelElevated, borderBottomRightRadius: 4, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  otherMessageBubble: { backgroundColor: BeerColors.panel, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  senderName: { color: BeerColors.iconPrimary, fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
   messageText: { fontSize: 15, lineHeight: 20 },
-  myMessageText: { color: '#4d4c41' },
-  otherMessageText: { color: '#E8D5DA' },
+  myMessageText: { color: BeerColors.textPrimary },
+  otherMessageText: { color: BeerColors.textPrimary },
   timestamp: { fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
-  myTimestamp: { color: '#666' },
-  otherTimestamp: { color: '#aaa' },
-  inputContainer: { backgroundColor: '#5A4B5C', paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: '#7A6B7D' },
+  myTimestamp: { color: BeerColors.textMuted },
+  otherTimestamp: { color: BeerColors.textMuted },
+  inputContainer: { backgroundColor: BeerColors.panel, paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: BeerColors.borderSoft },
   inputWrapper: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, gap: 12 },
-  input: { flex: 1, backgroundColor: '#4A3B47', borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12, color: '#E8D5DA', fontSize: 15, maxHeight: 100, borderWidth: 1, borderColor: '#7A6B7D' },
+  input: { flex: 1, backgroundColor: BeerColors.panelElevated, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12, color: BeerColors.textPrimary, fontSize: 15, maxHeight: 100, borderWidth: 1, borderColor: BeerColors.borderSoft },
   inputDisabled: { opacity: 0.6 },
-  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center' },
-  sendButtonDisabled: { backgroundColor: '#7A6B7D' },
+  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: BeerColors.panelElevated, borderWidth: 1, borderColor: BeerColors.borderSoft, justifyContent: 'center', alignItems: 'center' },
+  sendButtonDisabled: { backgroundColor: BeerColors.panelSoft },
   joinPrompt: { backgroundColor: '#E8D5DA', padding: 24, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#3A6A6F' },
   joinPromptIcon: { fontSize: 32, marginBottom: 12 },
   joinPromptText: { color: '#4d4c41', fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },

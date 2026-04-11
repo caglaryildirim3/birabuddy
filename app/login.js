@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
+import BeerColors from '../constants/BeerColors';
 
 export default function Login() {
   const { t } = useTranslation();
@@ -166,7 +167,7 @@ export default function Login() {
       <TextInput
         style={styles.input}
         placeholder={t('studentEmailPlaceholder')}
-        placeholderTextColor="#aaa"
+        placeholderTextColor={BeerColors.textMuted}
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
@@ -177,7 +178,7 @@ export default function Login() {
       <TextInput
         style={styles.input}
         placeholder={t('passwordPlaceholder')}
-        placeholderTextColor="#aaa"
+        placeholderTextColor={BeerColors.textMuted}
         value={password}
         onChangeText={setPassword}
         secureTextEntry
@@ -190,7 +191,7 @@ export default function Login() {
         onPress={handleLogin}
         disabled={loading}
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{t('logIn')}</Text>}
+        {loading ? <ActivityIndicator color={BeerColors.white} /> : <Text style={styles.buttonText}>{t('logIn')}</Text>}
       </Pressable>
 
       {/* ✅ HELPER LINKS - NOW VERTICAL */}
@@ -235,29 +236,29 @@ export default function Login() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: BeerColors.background,
     justifyContent: 'center',
     padding: 24,
   },
   title: {
     fontSize: 28,
-    color: '#fff',
+    color: BeerColors.textPrimary,
     marginBottom: 24,
     textAlign: 'center',
     fontWeight: 'bold',
   },
   input: {
-    backgroundColor: '#1e1e1e',
-    color: '#fff',
+    backgroundColor: BeerColors.panel,
+    color: BeerColors.textPrimary,
     padding: 16,
     borderRadius: 12,
     marginBottom: 16,
-    borderColor: '#333',
+    borderColor: BeerColors.borderSoft,
     borderWidth: 1,
     fontSize: 16,
   },
   button: {
-    backgroundColor: '#fff',
+    backgroundColor: BeerColors.panelElevated,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -268,7 +269,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   buttonText: {
-    color: '#121212',
+    color: BeerColors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -284,7 +285,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   helperText: {
-    color: '#bbb',
+    color: BeerColors.textSecondary,
     fontSize: 14,
     textDecorationLine: 'underline',
   },
@@ -298,25 +299,25 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#333',
+    backgroundColor: BeerColors.borderSoft,
   },
   dividerText: {
-    color: '#666',
+    color: BeerColors.textMuted,
     paddingHorizontal: 10,
     fontSize: 14,
   },
 
   /* Register Button Styles */
   registerButton: {
-    backgroundColor: '#1e1e1e',
+    backgroundColor: BeerColors.panel,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: BeerColors.borderSoft,
   },
   registerButtonText: {
-    color: '#fff',
+    color: BeerColors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
   },

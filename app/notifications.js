@@ -6,6 +6,7 @@ import { auth, db } from '../firebase/firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import BeerColors from '../constants/BeerColors';
 
 export default function Notifications() {
   const { t } = useTranslation();
@@ -123,13 +124,13 @@ export default function Notifications() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+            <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
           </Pressable>
           <Text style={styles.title}>{t('notifications')}</Text>
           <View style={{width: 24}} />
         </View>
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#E8A4C7" />
+          <ActivityIndicator size="large" color={BeerColors.textPrimary} />
         </View>
       </View>
     );
@@ -140,12 +141,12 @@ export default function Notifications() {
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+          <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
         </Pressable>
         <Text style={styles.title}>{t('notifications')}</Text>
         {notifications.length > 0 ? (
           <Pressable onPress={clearAll} style={styles.clearButton}>
-            <Ionicons name="trash-outline" size={22} color="#E8A4C7" />
+            <Ionicons name="trash-outline" size={22} color={BeerColors.textPrimary} />
           </Pressable>
         ) : (
           <View style={{width: 24}} />
@@ -171,7 +172,7 @@ export default function Notifications() {
                 <Ionicons 
                   name={getIconName(n.type)} 
                   size={24} 
-                  color="#4d4c41" 
+                  color={BeerColors.iconPrimary} 
                 />
               </View>
               <View style={styles.cardContent}>
@@ -191,7 +192,7 @@ export default function Notifications() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
   },
   header: {
     flexDirection: 'row',
@@ -200,18 +201,18 @@ const styles = StyleSheet.create({
     paddingTop: 50, // Safe area padding
     paddingBottom: 10,
     paddingHorizontal: 20,
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
   },
   backButton: { padding: 4 },
   clearButton: { padding: 4 },
-  title: { fontSize: 22, fontWeight: 'bold', color: '#E8A4C7' },
+  title: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary },
   
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
   scrollContent: { padding: 20, paddingBottom: 50 },
   
   // Cards
   card: {
-    backgroundColor: '#E8D5DA',
+    backgroundColor: BeerColors.panel,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,

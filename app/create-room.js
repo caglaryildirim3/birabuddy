@@ -18,6 +18,7 @@ import { auth, db } from '../firebase/firebaseConfig';
 import { useButtonDelay } from '../hooks/useButtonDelay';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import BeerColors from '../constants/BeerColors';
 
 export default function CreateRoom() {
   const { t } = useTranslation();
@@ -230,14 +231,14 @@ export default function CreateRoom() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#4A3B47' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: BeerColors.background }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
         <View style={styles.headerRow}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={28} color="#E8A4C7" />
+            <Ionicons name="arrow-back" size={28} color={BeerColors.textPrimary} />
           </Pressable>
         </View>
 
@@ -252,7 +253,7 @@ export default function CreateRoom() {
                 name.length > NAME_LIMIT && styles.inputError
               ]}
               placeholder={t('roomNamePlaceholder')}
-              placeholderTextColor="#999"
+              placeholderTextColor={BeerColors.textMuted}
               value={name}
               onChangeText={setName}
               maxLength={NAME_LIMIT + 10} 
@@ -273,7 +274,7 @@ export default function CreateRoom() {
                 description.length > DESCRIPTION_LIMIT && styles.inputError
               ]}
               placeholder={t('descriptionPlaceholder')}
-              placeholderTextColor="#999"
+              placeholderTextColor={BeerColors.textMuted}
               value={description}
               onChangeText={setDescription}
               multiline={true}
@@ -356,7 +357,7 @@ export default function CreateRoom() {
                 barName.length > BAR_NAME_LIMIT && styles.inputError
               ]}
               placeholder={t('barPlaceholder')}
-              placeholderTextColor="#999"
+              placeholderTextColor={BeerColors.textMuted}
               value={barName}
               onChangeText={setBarName}
               maxLength={BAR_NAME_LIMIT + 10}
@@ -427,7 +428,7 @@ export default function CreateRoom() {
           <TextInput
             style={styles.input}
             placeholder={t('maxPeoplePlaceholder')}
-            placeholderTextColor="#999"
+            placeholderTextColor={BeerColors.textMuted}
             keyboardType="numeric"
             value={maxPeople}
             onChangeText={setMaxPeople}
@@ -468,7 +469,7 @@ const styles = StyleSheet.create({
     marginLeft: -8,
   },
   container: {
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
     padding: 24,
     paddingTop: 10,
     flexGrow: 1,
@@ -476,14 +477,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     textAlign: 'center',
     marginBottom: 10,
     letterSpacing: 1,
   },
   subtitle: {
     fontSize: 16,
-    color: '#E8D5DA',
+    color: BeerColors.textSecondary,
     textAlign: 'center',
     marginBottom: 30,
     fontStyle: 'italic',
@@ -493,12 +494,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   input: {
-    backgroundColor: '#5A4B5C',
-    color: '#E8D5DA',
+    backgroundColor: BeerColors.panel,
+    color: BeerColors.textPrimary,
     padding: 16,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
     fontSize: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -514,7 +515,7 @@ const styles = StyleSheet.create({
     minHeight: 80,
   },
   characterCount: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 12,
     textAlign: 'right',
     marginTop: 4,
@@ -526,14 +527,14 @@ const styles = StyleSheet.create({
     opacity: 1,
   },
   sectionTitle: {
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 12,
     textAlign: 'center',
   },
   fieldLabel: {
-    color: '#E8A4C7',
+    color: BeerColors.textPrimary,
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 8,
@@ -544,25 +545,25 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   neighborhoodButton: {
-    backgroundColor: '#5A4B5C',
+    backgroundColor: BeerColors.panel,
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
   },
   neighborhoodButtonSelected: {
-    backgroundColor: '#E8A4C7',
-    borderColor: '#E8A4C7',
+    backgroundColor: BeerColors.panelElevated,
+    borderColor: BeerColors.borderSoft,
   },
   neighborhoodButtonText: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 14,
     fontWeight: '500',
     textTransform: 'capitalize',
   },
   neighborhoodButtonTextSelected: {
-    color: '#4A3B47',
+    color: BeerColors.textPrimary,
     fontWeight: 'bold',
   },
   dateContainer: {
@@ -573,31 +574,31 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   dayButton: {
-    backgroundColor: '#5A4B5C',
+    backgroundColor: BeerColors.panel,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: BeerColors.borderSoft,
     minWidth: 70,
   },
   dayButtonSelected: {
-    backgroundColor: '#E8A4C7',
-    borderColor: '#E8A4C7',
+    backgroundColor: BeerColors.panelElevated,
+    borderColor: BeerColors.borderSoft,
   },
   todayButton: {
     borderColor: '#FFD700',
     borderWidth: 3,
   },
   dayButtonText: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 14,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
   dayButtonTextSelected: {
-    color: '#4A3B47',
+    color: BeerColors.textPrimary,
     fontWeight: 'bold',
   },
   todayButtonText: {
@@ -605,13 +606,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   dateButtonText: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 12,
     marginTop: 2,
     opacity: 0.8,
   },
   dateButtonTextSelected: {
-    color: '#4A3B47',
+    color: BeerColors.textPrimary,
     opacity: 1,
     fontWeight: '600',
   },
@@ -628,11 +629,11 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   dateText: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
     fontSize: 16,
   },
   button: {
-    backgroundColor: '#E8A4C7',
+    backgroundColor: BeerColors.panelElevated,
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
@@ -645,16 +646,16 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   buttonText: {
-    color: '#4A3B47',
+    color: BeerColors.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
     letterSpacing: 0.5,
   },
   buttonDisabled: {
-    backgroundColor: '#7A6B7D',
+    backgroundColor: BeerColors.panel,
     opacity: 0.7,
   },
   buttonTextDisabled: {
-    color: '#E8D5DA',
+    color: BeerColors.textPrimary,
   },
 });

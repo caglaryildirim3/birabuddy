@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
 import { useTranslation } from 'react-i18next';
+import BeerColors from '../constants/BeerColors';
 
 const CITY_NEIGHBORHOODS = {
   istanbul: ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'],
@@ -374,20 +375,20 @@ export default function JoinRoom() {
           ) : null}
 
           <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={14} color="#4d4c41" />
+            <Ionicons name="location-outline" size={14} color={BeerColors.iconPrimary} />
             <Text style={styles.location} numberOfLines={1}>
               {item.city ? `${item.neighborhood || item.location}, ${item.city}` : (item.neighborhood || item.location)}
             </Text>
           </View>
           <View style={styles.infoRow}>
-            <Ionicons name="time-outline" size={14} color="#4d4c41" />
+            <Ionicons name="time-outline" size={14} color={BeerColors.iconPrimary} />
             <Text style={styles.time}>{formatDateTimeShort(item.date, item.time)}</Text>
           </View>
         </View>
 
         <View style={styles.cardRight}>
           <View style={styles.countContainer}>
-            <Ionicons name="people" size={16} color="#3A6A6F" />
+            <Ionicons name="people" size={16} color={BeerColors.iconPrimary} />
             <Text style={styles.peopleCount}>{currentCount}/{item.maxParticipants || '?'}</Text>
           </View>
 
@@ -416,7 +417,7 @@ export default function JoinRoom() {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+            <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
           </Pressable>
           <Text style={styles.headerTitle}>{t('joinAMeetup')} 🍻</Text>
           <View style={{width: 40}} /> 
@@ -432,11 +433,11 @@ export default function JoinRoom() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+          <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
         </Pressable>
         <Text style={styles.headerTitle}>{t('joinAMeetup')} 🍻</Text>
         <Pressable style={styles.filterIconBtn} onPress={openFilterModal}>
-          <Ionicons name="filter" size={24} color="#E1B604" />
+          <Ionicons name="filter" size={24} color={BeerColors.iconPrimary} />
         </Pressable>
       </View>
 
@@ -451,7 +452,7 @@ export default function JoinRoom() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('filterRooms')}</Text>
               <Pressable onPress={() => setIsFilterVisible(false)}>
-                <Ionicons name="close" size={24} color="#4A3B47" />
+                <Ionicons name="close" size={24} color={BeerColors.textPrimary} />
               </Pressable>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -561,7 +562,7 @@ export default function JoinRoom() {
                setActiveTimeStart(null);
              }}
           >
-            <Text style={{color: '#E1B604', marginTop: 10}}>{t('clearFilters')}</Text>
+            <Text style={{color: BeerColors.textPrimary, marginTop: 10}}>{t('clearFilters')}</Text>
           </Pressable>
         </View>
       ) : (
@@ -580,7 +581,7 @@ export default function JoinRoom() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
   },
   header: {
     flexDirection: 'row',
@@ -589,14 +590,14 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 10,
     paddingHorizontal: 20,
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
   },
   backButton: { padding: 4 },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#E8A4C7' },
-  filterIconBtn: { padding: 8, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 8 },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary },
+  filterIconBtn: { padding: 8, backgroundColor: BeerColors.panelSoft, borderRadius: 8, borderWidth: 1, borderColor: BeerColors.borderSoft },
   flatListContent: { paddingBottom: 100 },
   card: {
-    backgroundColor: '#E8D5DA',
+    backgroundColor: BeerColors.panel,
     marginHorizontal: 20, 
     marginBottom: 12,     
     borderRadius: 12,
@@ -604,7 +605,7 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#3A6A6F',
+    borderColor: BeerColors.borderSoft,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -613,34 +614,34 @@ const styles = StyleSheet.create({
   },
   cardLeft: { flex: 1, marginRight: 10 },
   cardRight: { alignItems: 'flex-end', justifyContent: 'space-between', minWidth: 70 },
-  title: { fontSize: 18, fontWeight: 'bold', color: '#4d4c41', marginBottom: 2 },
-  description: { fontSize: 13, color: '#666', marginBottom: 6, fontStyle: 'italic' },
+  title: { fontSize: 18, fontWeight: 'bold', color: BeerColors.textPrimary, marginBottom: 2 },
+  description: { fontSize: 13, color: BeerColors.textSecondary, marginBottom: 6, fontStyle: 'italic' },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  location: { fontSize: 13, color: '#4d4c41', marginLeft: 4, fontWeight: '600', textTransform: 'capitalize' },
-  time: { fontSize: 13, color: '#666', marginLeft: 4 },
+  location: { fontSize: 13, color: BeerColors.textPrimary, marginLeft: 4, fontWeight: '600', textTransform: 'capitalize' },
+  time: { fontSize: 13, color: BeerColors.textSecondary, marginLeft: 4 },
   countContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  peopleCount: { fontSize: 14, fontWeight: 'bold', color: '#3A6A6F', marginLeft: 4 },
-  joinButton: { backgroundColor: '#E1B604', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20 },
-  joinButtonText: { color: '#1C6F75', fontWeight: 'bold', fontSize: 12 },
-  requestedBadge: { backgroundColor: '#DCD8A7', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20 },
-  requestedText: { fontSize: 11, color: '#555', fontWeight: '600' },
+  peopleCount: { fontSize: 14, fontWeight: 'bold', color: BeerColors.textPrimary, marginLeft: 4 },
+  joinButton: { backgroundColor: BeerColors.panelElevated, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  joinButtonText: { color: BeerColors.textPrimary, fontWeight: 'bold', fontSize: 12 },
+  requestedBadge: { backgroundColor: BeerColors.panelSoft, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  requestedText: { fontSize: 11, color: BeerColors.textSecondary, fontWeight: '600' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyText: { color: '#E8A4C7', fontSize: 16 },
+  emptyText: { color: BeerColors.textPrimary, fontSize: 16 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#E8D5DA', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, height: '85%' },
+  modalContent: { backgroundColor: BeerColors.panel, borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, height: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#4A3B47' },
-  filterLabel: { fontSize: 15, fontWeight: '700', color: '#4A3B47', marginTop: 15, marginBottom: 8 },
-  input: { backgroundColor: '#FFF', borderRadius: 8, padding: 12, fontSize: 14, color: '#333' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: BeerColors.textPrimary },
+  filterLabel: { fontSize: 15, fontWeight: '700', color: BeerColors.textPrimary, marginTop: 15, marginBottom: 8 },
+  input: { backgroundColor: BeerColors.panelElevated, borderRadius: 8, padding: 12, fontSize: 14, color: BeerColors.textPrimary, borderWidth: 1, borderColor: BeerColors.borderSoft },
   chipScroll: { flexDirection: 'row', marginBottom: 5 },
   wrapContainer: { flexDirection: 'row', flexWrap: 'wrap' },
-  chip: { backgroundColor: '#FFF', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E1B604' },
-  chipActive: { backgroundColor: '#E1B604' },
-  chipText: { color: '#4A3B47', fontSize: 12, textTransform: 'capitalize' },
-  chipTextActive: { color: '#FFF', fontWeight: 'bold' },
+  chip: { backgroundColor: BeerColors.panelElevated, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  chipActive: { backgroundColor: BeerColors.panelSoft },
+  chipText: { color: BeerColors.textSecondary, fontSize: 12, textTransform: 'capitalize' },
+  chipTextActive: { color: BeerColors.textPrimary, fontWeight: 'bold' },
   modalFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, marginBottom: 20 },
-  clearButton: { flex: 0.3, padding: 15, borderRadius: 12, alignItems: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: '#4A3B47' },
-  clearButtonText: { color: '#4A3B47', fontWeight: 'bold' },
-  applyButton: { flex: 0.65, backgroundColor: '#4A3B47', padding: 15, borderRadius: 12, alignItems: 'center' },
-  applyButtonText: { color: '#E1B604', fontSize: 16, fontWeight: 'bold' },
+  clearButton: { flex: 0.3, padding: 15, borderRadius: 12, alignItems: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: BeerColors.borderSoft },
+  clearButtonText: { color: BeerColors.textPrimary, fontWeight: 'bold' },
+  applyButton: { flex: 0.65, backgroundColor: BeerColors.panelElevated, padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
+  applyButtonText: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: 'bold' },
 });

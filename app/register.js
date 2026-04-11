@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ActivityIndicator, Modal, ScrollView } from 'react-native';
-import { createUserWithEmailAndPassword, sendEmailVerification, signOut, deleteUser } from 'firebase/auth';
-import { auth, db } from '../firebase/firebaseConfig';
 import { Link, useRouter } from 'expo-router';
-import { setDoc, doc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, deleteUser, sendEmailVerification, signOut } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import BeerColors from '../constants/BeerColors';
+import { auth, db } from '../firebase/firebaseConfig';
 
 export default function Register() {
   const { t } = useTranslation();
@@ -588,7 +589,7 @@ const handleRegister = async () => {
       <TextInput
         style={styles.input}
         placeholder={t('instagramUsernamePlaceholder')}
-        placeholderTextColor="#aaa"
+        placeholderTextColor={BeerColors.textMuted}
         value={instagramUsername}
         onChangeText={setInstagramUsername}
         maxLength={30}
@@ -598,7 +599,7 @@ const handleRegister = async () => {
       <TextInput
         style={styles.input}
         placeholder={t('studentEmailRegister')}
-        placeholderTextColor="#aaa"
+        placeholderTextColor={BeerColors.textMuted}
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
@@ -609,7 +610,7 @@ const handleRegister = async () => {
       <TextInput
         style={styles.input}
         placeholder={t('passwordPlaceholder')}
-        placeholderTextColor="#aaa"
+        placeholderTextColor={BeerColors.textMuted}
         value={password}
         onChangeText={setPassword}
         secureTextEntry
@@ -680,7 +681,7 @@ const handleRegister = async () => {
         disabled={loading}
       >
         {loading ? (
-          <ActivityIndicator size="small" color="#e5f253ff" />
+          <ActivityIndicator size="small" color={BeerColors.textPrimary} />
         ) : (
           <Text style={styles.buttonText}>{t('createAccount')}</Text>
         )}
@@ -772,27 +773,27 @@ const handleRegister = async () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000ff',
+    backgroundColor: BeerColors.background,
     padding: 24,
     paddingTop: 60,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#DCD8A7',
+    color: BeerColors.textPrimary,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
-    color: '#DCD8A7',
+    color: BeerColors.textSecondary,
     marginBottom: 30,
     textAlign: 'center',
     opacity: 0.8,
   },
   input: {
-    backgroundColor: '#4e04e1ff',
-    color: '#dce38dff',
+    backgroundColor: BeerColors.panel,
+    color: BeerColors.textPrimary,
     padding: 14,
     borderRadius: 10,
     marginBottom: 16,
@@ -812,7 +813,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   detailText: {
-    color: '#e5f253ff',
+    color: BeerColors.textPrimary,
     fontSize: 11,
     textDecorationLine: 'underline',
   },
@@ -825,7 +826,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderWidth: 2,
-    borderColor: '#DCD8A7',
+    borderColor: BeerColors.borderSoft,
     borderRadius: 3,
     marginRight: 10,
     alignItems: 'center',
@@ -833,21 +834,21 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   checkboxChecked: {
-    backgroundColor: '#4e04e1ff',
+    backgroundColor: BeerColors.panelElevated,
   },
   checkmark: {
-    color: '#e5f253ff',
+    color: BeerColors.textPrimary,
     fontSize: 12,
     fontWeight: 'bold',
   },
   checkboxText: {
-    color: '#DCD8A7',
+    color: BeerColors.textPrimary,
     fontSize: 12,
     flex: 1,
     lineHeight: 18,
   },
   button: {
-    backgroundColor: '#4e04e1ff',
+    backgroundColor: BeerColors.panelElevated,
     padding: 14,
     borderRadius: 10,
     alignItems: 'center',
@@ -858,7 +859,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#e5f253ff',
+    color: BeerColors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -869,13 +870,13 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   infoText: {
-    color: '#DCD8A7',
+    color: BeerColors.textSecondary,
     fontSize: 12,
     textAlign: 'center',
     lineHeight: 16,
   },
   link: {
-    color: '#DCD8A7',
+    color: BeerColors.textPrimary,
     textAlign: 'center',
     marginTop: 16,
     textDecorationLine: 'underline',
@@ -887,7 +888,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
   },
   modalContent: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: BeerColors.panel,
     margin: 20,
     borderRadius: 10,
     padding: 20,
@@ -897,7 +898,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#DCD8A7',
+    color: BeerColors.textPrimary,
     textAlign: 'center',
     marginBottom: 15,
   },
@@ -905,7 +906,7 @@ const styles = StyleSheet.create({
     maxHeight: 400,
   },
   modalText: {
-    color: '#DCD8A7',
+    color: BeerColors.textSecondary,
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'left',
@@ -922,7 +923,7 @@ const styles = StyleSheet.create({
     flex: 0.45,
   },
   modalAcceptButton: {
-    backgroundColor: '#4e04e1ff',
+    backgroundColor: BeerColors.panelElevated,
     padding: 12,
     borderRadius: 8,
     flex: 0.45,
@@ -933,7 +934,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   modalAcceptText: {
-    color: '#e5f253ff',
+    color: BeerColors.textPrimary,
     textAlign: 'center',
     fontWeight: 'bold',
   },

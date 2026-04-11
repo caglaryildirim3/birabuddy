@@ -1,17 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Link, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Alert, Dimensions, Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import CheersImage from '../assets/cheers.png';
+import BeerColors from '../constants/BeerColors';
 import { auth } from '../firebase/firebaseConfig';
-import { useTranslation } from 'react-i18next';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 const GAP = 20;
 const PADDING = 24;
 const BUTTON_WIDTH = (width - (PADDING * 2) - GAP) / 2; 
+const BEER_COLORS = {
+  ...BeerColors,
+  buttonBg: '#121212',
+  iconDark: '#DDE3FF',
+  fab: '#161616',
+};
 
 export default function Home() {
   const { t, i18n } = useTranslation();
@@ -102,13 +109,13 @@ export default function Home() {
           </Pressable>
 
           <Pressable style={styles.iconButton} onPress={handleSignOut}>
-            <Ionicons name="log-out-outline" size={24} color="#E8A4C7" />
+            <Ionicons name="log-out-outline" size={24} color={BEER_COLORS.textPrimary} />
           </Pressable>
         </View>
 
         <Link href="/notifications" asChild>
           <Pressable style={styles.iconButton}>
-            <Ionicons name="notifications-outline" size={24} color="#E8A4C7" />
+            <Ionicons name="notifications-outline" size={24} color={BEER_COLORS.textPrimary} />
             {unreadCount > 0 && (
               <View style={styles.notificationBadge}>
                 <Text style={styles.notificationBadgeText}>{unreadCount}</Text>
@@ -149,7 +156,7 @@ export default function Home() {
             <Link href="/create-room" asChild>
               <Pressable style={styles.gridButton}>
                 <View style={styles.iconCircle}>
-                  <Ionicons name="add" size={32} color="#4A3B47" />
+                  <Ionicons name="add" size={32} color={BEER_COLORS.iconDark} />
                 </View>
                 <Text style={styles.gridButtonText}>{t('createARoom')}</Text>
               </Pressable>
@@ -158,7 +165,7 @@ export default function Home() {
             <Link href="/room-list" asChild>
               <Pressable style={styles.gridButton}>
                 <View style={styles.iconCircle}>
-                  <Ionicons name="search" size={28} color="#4A3B47" />
+                  <Ionicons name="search" size={28} color={BEER_COLORS.iconDark} />
                 </View>
                 <Text style={styles.gridButtonText}>{t('joinARoom')}</Text>
               </Pressable>
@@ -169,7 +176,7 @@ export default function Home() {
             <Link href="/my-rooms" asChild>
               <Pressable style={styles.gridButton}>
                 <View style={styles.iconCircle}>
-                  <Ionicons name="home" size={28} color="#4A3B47" />
+                  <Ionicons name="home" size={28} color={BEER_COLORS.iconDark} />
                 </View>
                 <Text style={styles.gridButtonText}>{t('myRooms')}</Text>
               </Pressable>
@@ -177,7 +184,7 @@ export default function Home() {
 
             <Pressable style={styles.gridButton} onPress={handleActiveRooms}>
               <View style={styles.iconCircle}>
-                <Ionicons name="beer" size={28} color="#4A3B47" />
+                <Ionicons name="beer" size={28} color={BEER_COLORS.iconDark} />
               </View>
               <Text style={styles.gridButtonText}>{t('activeRooms')}</Text>
             </Pressable>
@@ -193,7 +200,7 @@ export default function Home() {
       {/* FAB */}
       <Link href="/my-profile" asChild>
         <Pressable style={styles.fab}>
-          <Ionicons name="person" size={32} color="#4A3B47" />
+          <Ionicons name="person" size={32} color={BEER_COLORS.iconDark} />
         </Pressable>
       </Link>
     </SafeAreaView>
@@ -203,7 +210,7 @@ export default function Home() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#8a6477ff',
+    backgroundColor: BEER_COLORS.background,
   },
   topBar: {
     flexDirection: 'row',
@@ -223,43 +230,45 @@ const styles = StyleSheet.create({
   languageButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(232, 164, 199, 0.15)',
+    backgroundColor: BEER_COLORS.panelSoft,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(232, 164, 199, 0.3)',
+    borderColor: BEER_COLORS.textPrimary,
   },
   languageFlag: {
     fontSize: 18,
     marginRight: 6,
   },
   languageText: {
-    color: '#E8A4C7',
+    color: BEER_COLORS.textPrimary,
     fontSize: 13,
     fontWeight: 'bold',
   },
   
   iconButton: {
     padding: 10,
-    backgroundColor: 'rgba(173, 93, 93, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: BEER_COLORS.textPrimary,
     borderRadius: 14,
   },
   notificationBadge: {
     position: 'absolute',
     top: -2,
     right: -2,
-    backgroundColor: '#D32F2F',
+    backgroundColor: BEER_COLORS.badge,
     borderRadius: 8,
     minWidth: 16,
     height: 16,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#4A3B47',
+    borderColor: BEER_COLORS.background,
   },
   notificationBadgeText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 9,
     fontWeight: 'bold',
   },
@@ -282,13 +291,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 46,
     fontWeight: 'bold',
-    color: '#f6ffa9',
+    color: BEER_COLORS.textPrimary,
     marginBottom: -500,
   },
   subtitle: {
     fontSize: 16,
     fontWeight: '400',
-    color: '#E8D5DA',
+    color: BEER_COLORS.textSecondary,
     opacity: 0.7,
     fontStyle: 'italic',
   },
@@ -301,26 +310,28 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#DCD8A7',
+    color: BEER_COLORS.textSecondary,
     marginBottom: 12,
   },
   activeRoomCard: {
-    backgroundColor: '#3A6A6F',
+    backgroundColor: BEER_COLORS.panel,
     padding: 16,
     borderRadius: 16,
     marginBottom: 10,
     width: '100%',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   roomName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#E8D5DA',
+    color: BEER_COLORS.textPrimary,
     marginBottom: 4,
   },
   roomDetails: {
     fontSize: 14,
-    color: '#E8D5DA',
+    color: BEER_COLORS.textSecondary,
     opacity: 0.8,
   },
 
@@ -336,13 +347,15 @@ const styles = StyleSheet.create({
   gridButton: {
     width: BUTTON_WIDTH,
     height: BUTTON_WIDTH,
-    backgroundColor: '#E8D5DA',
+    backgroundColor: BEER_COLORS.buttonBg,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.18,
     shadowRadius: 8,
     elevation: 5,
   },
@@ -350,13 +363,13 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: 'rgba(74, 59, 71, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
   },
   gridButtonText: {
-    color: '#4A3B47',
+    color: BEER_COLORS.textPrimary,
     fontSize: 15,
     fontWeight: '700',
     textAlign: 'center',
@@ -365,10 +378,10 @@ const styles = StyleSheet.create({
   footerSection: {
     alignItems: 'center',
     justifyContent: 'flex-end',
-    marginBottom: 40,
+    marginBottom: 20,
   },
   cheers: {
-    width: 100,
+    width: 0,
     height: 70,
     resizeMode: 'contain',
     opacity: 0.8,
@@ -381,13 +394,15 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#E8A4C7',
+    backgroundColor: BEER_COLORS.fab,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 8,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
   },
 });

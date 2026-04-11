@@ -6,6 +6,7 @@ import { db, auth } from '../firebase/firebaseConfig';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import BeerColors from '../constants/BeerColors';
 
 export default function MyRooms() {
   const { t } = useTranslation();
@@ -153,18 +154,18 @@ export default function MyRooms() {
           ) : null}
 
           <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={14} color="#4d4c41" />
+            <Ionicons name="location-outline" size={14} color={BeerColors.iconPrimary} />
             <Text style={styles.location} numberOfLines={1}>{item.neighborhood || t('noLocation')}</Text>
           </View>
           <View style={styles.infoRow}>
-            <Ionicons name="time-outline" size={14} color="#4d4c41" />
+            <Ionicons name="time-outline" size={14} color={BeerColors.iconPrimary} />
             <Text style={styles.time}>{formatDateTimeShort(item.date, item.time)}</Text>
           </View>
         </View>
 
         <View style={styles.cardRight}>
           <View style={styles.countContainer}>
-            <Ionicons name="people" size={16} color="#3A6A6F" />
+            <Ionicons name="people" size={16} color={BeerColors.iconPrimary} />
             <Text style={styles.peopleCount}>{stats.participants}/{item.maxParticipants || '?'}</Text>
           </View>
         </View>
@@ -177,7 +178,7 @@ export default function MyRooms() {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+            <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
           </Pressable>
           <Text style={styles.title}>{t('myRooms')}</Text>
           <View style={{width: 24}} />
@@ -193,7 +194,7 @@ export default function MyRooms() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+          <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
         </Pressable>
         <Text style={styles.title}>{t('myRooms')}</Text>
         <View style={{width: 24}} />
@@ -205,7 +206,7 @@ export default function MyRooms() {
         renderItem={renderRoom}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#E8A4C7" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={BeerColors.textPrimary} />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyTitle}>{t('no rooms yet')}</Text>
@@ -222,7 +223,7 @@ export default function MyRooms() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4A3B47',
+    backgroundColor: BeerColors.background,
   },
   header: {
     flexDirection: 'row',
@@ -233,13 +234,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   backButton: { padding: 4 },
-  title: { fontSize: 22, fontWeight: 'bold', color: '#E8A4C7' },
+  title: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary },
   scrollContent: { paddingBottom: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: '#E8A4C7', fontSize: 16 },
+  loadingText: { color: BeerColors.textPrimary, fontSize: 16 },
   
   card: {
-    backgroundColor: '#E8D5DA',
+    backgroundColor: BeerColors.panel,
     marginHorizontal: 20,
     marginBottom: 12,
     borderRadius: 12,
@@ -247,7 +248,7 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#3A6A6F',
+    borderColor: BeerColors.borderSoft,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -266,12 +267,12 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#4d4c41',
+    color: BeerColors.textPrimary,
     marginBottom: 2,
   },
   description: {
     fontSize: 13,
-    color: '#666',
+    color: BeerColors.textSecondary,
     marginBottom: 6,
     fontStyle: 'italic',
   },
@@ -282,14 +283,14 @@ const styles = StyleSheet.create({
   },
   location: {
     fontSize: 13,
-    color: '#4d4c41',
+    color: BeerColors.textPrimary,
     marginLeft: 4,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
   time: {
     fontSize: 13,
-    color: '#666',
+    color: BeerColors.textSecondary,
     marginLeft: 4,
   },
   countContainer: {
@@ -299,11 +300,11 @@ const styles = StyleSheet.create({
   peopleCount: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#3A6A6F',
+    color: BeerColors.textPrimary,
     marginLeft: 4,
   },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
-  emptyTitle: { fontSize: 22, fontWeight: 'bold', color: '#E8A4C7', marginBottom: 10 },
-  createButton: { backgroundColor: '#E8A4C7', paddingVertical: 14, paddingHorizontal: 32, borderRadius: 12 },
-  createButtonText: { color: '#4A3B47', fontSize: 16, fontWeight: 'bold' },
+  emptyTitle: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary, marginBottom: 10 },
+  createButton: { backgroundColor: BeerColors.panelElevated, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 12, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  createButtonText: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: 'bold' },
 });
