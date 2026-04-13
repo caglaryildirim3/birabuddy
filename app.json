@@ -2,7 +2,7 @@
   "expo": {
     "name": "birabuddy",
     "slug": "birabuddy",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "birabuddy",
@@ -22,6 +22,7 @@
       "supportsTablet": false,
       "deploymentTarget": "13.4",
       "bundleIdentifier": "com.caglaryildirim.birabuddy2",
+      "buildNumber": "26",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses camera to scan beer labels and take photos",
         "NSLocationWhenInUseUsageDescription": "This app uses location to find nearby breweries and bars",
@@ -29,7 +30,8 @@
       }
     },
     "android": {
-      "package": "com.caglaryildirim.birabuddy2",
+      "package": "com.caglaryildirim.birabuddy",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#1E1E1E"
