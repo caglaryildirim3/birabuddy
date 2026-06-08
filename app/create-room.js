@@ -19,6 +19,8 @@ import { useButtonDelay } from '../hooks/useButtonDelay';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import BeerColors from '../constants/BeerColors';
+import { NEIGHBORHOODS_BY_CITY, CITIES } from '../constants/locations';
+import { ROOM_VISIBILITY } from '../utils/roomUtils';
 
 export default function CreateRoom() {
   const { t } = useTranslation();
@@ -28,6 +30,7 @@ export default function CreateRoom() {
   const [neighborhood, setNeighborhood] = useState('');
   const [barName, setBarName] = useState('');
   const [maxPeople, setMaxPeople] = useState('');
+  const [visibility, setVisibility] = useState(ROOM_VISIBILITY.PUBLIC);
 
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -43,15 +46,8 @@ export default function CreateRoom() {
   const DESCRIPTION_LIMIT = 200;
   const BAR_NAME_LIMIT = 50;
 
-  const neighborhoodsByCity = {
-    istanbul: ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'],
-    ankara: ['cankaya', 'kizilay', 'tunali', 'bahcelievler', 'bilkent'],
-    izmir: ['alsancak', 'karsiyaka', 'bornova', 'guzelyali', 'bostanli'],
-    bursa: ['nilufer', 'osmangazi', 'gorkle', 'mudanya', 'fsm'],
-    antalya: ['konyaalti', 'lara', 'muratpasa', 'kepez', 'kaleici'],
-  };
-  const cities = Object.keys(neighborhoodsByCity);
-  const neighborhoods = city ? neighborhoodsByCity[city] : [];
+  const cities = CITIES;
+  const neighborhoods = city ? NEIGHBORHOODS_BY_CITY[city] : [];
 
   const today = new Date();
   const maxDate = new Date();
@@ -174,6 +170,7 @@ export default function CreateRoom() {
         participants: [auth.currentUser?.uid],
         requests: [],
         isActive: true,
+        visibility,
       });
 
       await setDoc(doc(db, 'rooms', roomRef.id, 'participants', auth.currentUser.uid), {
@@ -182,9 +179,7 @@ export default function CreateRoom() {
         joinedAt: serverTimestamp(),
       });
 
-      Alert.alert(t('roomCreated'), t('roomCreatedSuccess'));
-      
-      router.replace('/my-rooms');
+      router.replace('/(tabs)/feed');
       
     } catch (error) {
       console.error('Error creating room:', error);
@@ -409,30 +404,78 @@ export default function CreateRoom() {
             </ScrollView>
           </View>
 
-          <Pressable onPress={toggleTimePicker} style={styles.input}>
-            <Text style={styles.dateText}>
-              ⏰ {formatTimeForDisplay(selectedTime)}
-            </Text>
-          </Pressable>
-          
-          {showTimePicker && (
-            <DateTimePicker
-              value={selectedTime}
-              mode="time"
-              is24Hour={true}
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={onTimeChange}
-            />
-          )}
+          <View style={styles.fieldSpacing}>
+            <Pressable onPress={toggleTimePicker} style={styles.input}>
+              <Text style={styles.dateText}>
+                ⏰ {formatTimeForDisplay(selectedTime)}
+              </Text>
+            </Pressable>
 
-          <TextInput
-            style={styles.input}
-            placeholder={t('maxPeoplePlaceholder')}
-            placeholderTextColor={BeerColors.textMuted}
-            keyboardType="numeric"
-            value={maxPeople}
-            onChangeText={setMaxPeople}
-          />
+            {showTimePicker && (
+              <DateTimePicker
+                value={selectedTime}
+                mode="time"
+                is24Hour={true}
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={onTimeChange}
+                {...(Platform.OS === 'ios' && {
+                  textColor: BeerColors.textPrimary,
+                  themeVariant: 'light',
+                })}
+              />
+            )}
+          </View>
+
+          <View style={styles.fieldSpacing}>
+            <TextInput
+              style={styles.input}
+              placeholder={t('maxPeoplePlaceholder')}
+              placeholderTextColor={BeerColors.textMuted}
+              keyboardType="numeric"
+              value={maxPeople}
+              onChangeText={setMaxPeople}
+            />
+          </View>
+
+          <View style={styles.visibilitySection}>
+          <View style={styles.visibilityRow}>
+            <Pressable
+              style={[
+                styles.visibilityOption,
+                visibility === ROOM_VISIBILITY.PUBLIC && styles.visibilityOptionSelected,
+              ]}
+              onPress={() => setVisibility(ROOM_VISIBILITY.PUBLIC)}
+            >
+              <Text
+                style={[
+                  styles.visibilityOptionText,
+                  visibility === ROOM_VISIBILITY.PUBLIC && styles.visibilityOptionTextSelected,
+                ]}
+              >
+                🌍 {t('roomPublic')}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.visibilityOption,
+                visibility === ROOM_VISIBILITY.PRIVATE && styles.visibilityOptionSelected,
+              ]}
+              onPress={() => setVisibility(ROOM_VISIBILITY.PRIVATE)}
+            >
+              <Text
+                style={[
+                  styles.visibilityOptionText,
+                  visibility === ROOM_VISIBILITY.PRIVATE && styles.visibilityOptionTextSelected,
+                ]}
+              >
+                🔒 {t('roomPrivate')}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.visibilityHint}>
+            {visibility === ROOM_VISIBILITY.PUBLIC ? t('roomPublicHint') : t('roomPrivateHint')}
+          </Text>
+          </View>
 
           <Pressable 
             style={[
@@ -508,7 +551,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   inputError: {
-    borderColor: '#E74C3C',
+    borderColor: BeerColors.danger,
     borderWidth: 3,
   },
   textArea: {
@@ -522,7 +565,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   characterCountError: {
-    color: '#E74C3C',
+    color: BeerColors.danger,
     fontWeight: 'bold',
     opacity: 1,
   },
@@ -585,10 +628,11 @@ const styles = StyleSheet.create({
   },
   dayButtonSelected: {
     backgroundColor: BeerColors.panelElevated,
-    borderColor: BeerColors.borderSoft,
+    borderColor: BeerColors.accent,
+    borderWidth: 2,
   },
   todayButton: {
-    borderColor: '#FFD700',
+    borderColor: BeerColors.accent,
     borderWidth: 3,
   },
   dayButtonText: {
@@ -602,7 +646,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   todayButtonText: {
-    color: '#FFD700',
+    color: BeerColors.accent,
     fontWeight: 'bold',
   },
   dateButtonText: {
@@ -617,12 +661,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   todayDateText: {
-    color: '#FFD700',
+    color: BeerColors.accent,
     opacity: 1,
     fontWeight: '600',
   },
   todayLabel: {
-    color: '#FFD700',
+    color: BeerColors.accent,
     fontSize: 10,
     fontWeight: 'bold',
     marginTop: 2,
@@ -632,8 +676,50 @@ const styles = StyleSheet.create({
     color: BeerColors.textPrimary,
     fontSize: 16,
   },
-  button: {
+  fieldSpacing: {
+    marginBottom: 16,
+  },
+  visibilitySection: {
+    marginBottom: 8,
+  },
+  visibilityRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  visibilityOption: {
+    flex: 1,
+    backgroundColor: BeerColors.panel,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: BeerColors.borderSoft,
+  },
+  visibilityOptionSelected: {
+    borderColor: BeerColors.accent,
     backgroundColor: BeerColors.panelElevated,
+  },
+  visibilityOptionText: {
+    color: BeerColors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  visibilityOptionTextSelected: {
+    color: BeerColors.textPrimary,
+    fontWeight: 'bold',
+  },
+  visibilityHint: {
+    color: BeerColors.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  button: {
+    backgroundColor: BeerColors.accent,
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
@@ -646,7 +732,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   buttonText: {
-    color: BeerColors.textPrimary,
+    color: BeerColors.onAccent,
     fontSize: 18,
     fontWeight: 'bold',
     letterSpacing: 0.5,

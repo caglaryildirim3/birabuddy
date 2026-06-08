@@ -1,14 +1,18 @@
-import '../i18n';  // ← BUNU EKLE EN ÜSTE
-import { Stack, usePathname, useRouter } from 'expo-router';
+import '../i18n';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import { auth } from '../firebase/firebaseConfig';
 
-export default function Layout() {
+function RootLayoutContent() {
   const router = useRouter();
-  const pathname = usePathname();
+  const segments = useSegments();
+  const { colors, isDark, ready: themeReady } = useTheme();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
 
@@ -22,31 +26,53 @@ export default function Layout() {
   }, []);
 
   useEffect(() => {
-    if (!loading) {
-      if (!user && pathname !== '/login' && pathname !== '/register') {
-        router.replace('/login');
-      } else if (user && (pathname === '/login' || pathname === '/register')) {
-        router.replace('/');
-      }
-    }
-  }, [user, loading, pathname]);
+    if (loading || !themeReady) return;
 
-  if (loading) {
+    const inAuthScreen = segments[0] === 'login' || segments[0] === 'register';
+
+    if (!user && !inAuthScreen) {
+      router.replace('/login');
+    } else if (user && inAuthScreen) {
+      router.replace('/(tabs)/feed');
+    }
+  }, [user, loading, segments, themeReady]);
+
+  if (loading || !themeReady) {
     return (
-      // Updated loading screen to match your Pink/Purple theme
-      <View style={{ flex: 1, backgroundColor: '#4A3B47', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#E8A4C7" />
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: colors.background,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
+        <StatusBar style={isDark ? 'light' : 'dark'} backgroundColor={colors.background} />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
 
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false, // 👈 THIS removes the black border/header
-        contentStyle: { backgroundColor: '#4A3B47' }, // 👈 Matches your app theme
-        animation: 'fade', // Optional: Makes screen transitions smoother
-      }}
-    />
+    <>
+      <StatusBar style={isDark ? 'light' : 'dark'} backgroundColor={colors.background} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: 'fade',
+        }}
+      />
+    </>
+  );
+}
+
+export default function Layout() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <RootLayoutContent />
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

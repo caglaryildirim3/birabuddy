@@ -6,30 +6,8 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { auth, db } from '../firebase/firebaseConfig';
 import { useTranslation } from 'react-i18next';
 import BeerColors from '../constants/BeerColors';
-
-const formatDateTimeShort = (dateVal, timeStr) => {
-  if (!dateVal) return 'unknown';
-
-  let dateObj;
-
-  if (dateVal.toDate) {
-    dateObj = dateVal.toDate();
-  } 
-  else if (typeof dateVal === 'string' && timeStr) {
-    dateObj = new Date(`${dateVal}T${timeStr}`);
-  } else {
-    return 'unknown';
-  }
-
-  return dateObj.toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  });
-};
+import { formatDateTimeShort, parseRoomDateTime } from '../utils/dateUtils';
+import { isRoomExpired } from '../utils/roomUtils';
 
 export default function ActiveRooms() {
   const { t } = useTranslation();
@@ -59,19 +37,9 @@ export default function ActiveRooms() {
             
             if (!date) continue;
 
-            let roomTime;
+            if (!parseRoomDateTime(date, time)) continue;
 
-            if (date.toDate) {
-                roomTime = date.toDate();
-            } else if (typeof date === 'string' && time) {
-                roomTime = new Date(`${date}T${time}`);
-            } else {
-                continue;
-            }
-            
-            const expiryTime = new Date(roomTime.getTime() + 24 * 60 * 60 * 1000);
-            
-            if (expiryTime < now) continue;
+            if (isRoomExpired(date, time, now)) continue;
 
             const participantDoc = await getDoc(doc(db, 'rooms', room.id, 'participants', auth.currentUser.uid));
             
@@ -131,13 +99,6 @@ export default function ActiveRooms() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
-          </Pressable>
-          <Text style={styles.title}>{t('activeRooms')}</Text>
-          <View style={{width: 24}} />
-        </View>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>{t('loading')}</Text>
         </View>
@@ -147,14 +108,6 @@ export default function ActiveRooms() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
-        </Pressable>
-        <Text style={styles.title}>{t('activeRooms')}</Text>
-        <View style={{width: 24}} />
-      </View>
-
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -166,7 +119,7 @@ export default function ActiveRooms() {
             <Text style={styles.emptyTitle}>{t('noActiveRooms')}</Text>
             <Pressable 
               style={styles.browseButton}
-              onPress={() => router.push('/room-list')}
+              onPress={() => router.push('/(tabs)/discover')}
             >
               <Text style={styles.browseButtonText}>{t('browse rooms')}</Text>
             </Pressable>
@@ -226,17 +179,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BeerColors.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 50,
-    paddingBottom: 10,
-    paddingHorizontal: 20,
-    backgroundColor: BeerColors.background,
-  },
-  backButton: { padding: 4 },
-  title: { fontSize: 24, fontWeight: 'bold', color: BeerColors.textPrimary },
   scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -328,10 +270,10 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 60, marginBottom: 20 },
   emptyTitle: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary, marginBottom: 10 },
   browseButton: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: BeerColors.accent,
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 12,
   },
-  browseButtonText: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: 'bold' },
+  browseButtonText: { color: BeerColors.onAccent, fontSize: 16, fontWeight: 'bold' },
 });

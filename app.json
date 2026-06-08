@@ -6,10 +6,10 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "birabuddy",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "description": "Find people to drink with - Only for students! (this is not a dating app :)",
-    "primaryColor": "#1E1E1E",
+    "description": "Find people to drink with - Only for students!",
+    "primaryColor": "#FFC629",
     "platforms": [
       "ios",
       "android"
@@ -20,13 +20,13 @@
     "runtimeVersion": "1.0.2",
     "ios": {
       "supportsTablet": false,
-      "deploymentTarget": "13.4",
       "bundleIdentifier": "com.caglaryildirim.birabuddy2",
       "buildNumber": "28",
+      "backgroundColor": "#FFFFFF",
       "infoPlist": {
-        "NSCameraUsageDescription": "This app uses camera to scan beer labels and take photos",
-        "NSLocationWhenInUseUsageDescription": "This app uses location to find nearby breweries and bars",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "BiraBuddy needs local network access to connect to the development server.",
+        "NSBonjourServices": ["_expo._tcp", "_react-native-packager._tcp"]
       }
     },
     "android": {
@@ -34,8 +34,9 @@
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#1E1E1E"
+        "backgroundColor": "#FFFFFF"
       },
+      "backgroundColor": "#FFFFFF",
       "edgeToEdgeEnabled": true,
       "permissions": [
         "CAMERA",
@@ -51,12 +52,24 @@
     "plugins": [
       "expo-router",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow BiraBuddy to share your approximate location with friends when you go live."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow BiraBuddy to access your photos to update your profile."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#1E1E1E"
+          "backgroundColor": "#FFFFFF"
         }
       ]
     ],

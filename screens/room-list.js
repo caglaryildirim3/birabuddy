@@ -7,8 +7,10 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
+  query,
   serverTimestamp,
-  updateDoc
+  updateDoc,
+  where,
 } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -26,16 +28,11 @@ import {
 import { auth, db } from '../firebase/firebaseConfig';
 import { useTranslation } from 'react-i18next';
 import BeerColors from '../constants/BeerColors';
-
-const CITY_NEIGHBORHOODS = {
-  istanbul: ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'],
-  ankara: ['cankaya', 'kizilay', 'tunali', 'bahcelievler', 'bilkent'],
-  izmir: ['alsancak', 'karsiyaka', 'bornova', 'guzelyali', 'bostanli'],
-  bursa: ['nilufer', 'osmangazi', 'gorkle', 'mudanya', 'fsm'],
-  antalya: ['konyaalti', 'lara', 'muratpasa', 'kepez', 'kaleici'],
-};
-const CITIES = Object.keys(CITY_NEIGHBORHOODS);
-const ALL_NEIGHBORHOODS = Object.values(CITY_NEIGHBORHOODS).flat();
+import { NEIGHBORHOODS_BY_CITY as CITY_NEIGHBORHOODS, CITIES, ALL_NEIGHBORHOODS } from '../constants/locations';
+import { getFriendIds } from '../utils/friendUtils';
+import { formatDateTimeShort, parseRoomDateTime } from '../utils/dateUtils';
+import { canViewRoom, isRoomExpired } from '../utils/roomUtils';
+import { isOutTonight } from '../utils/outTonightUtils';
 
 export default function JoinRoom() {
   const { t } = useTranslation();
@@ -43,6 +40,10 @@ export default function JoinRoom() {
   const [participantCounts, setParticipantCounts] = useState({});
   const [userParticipations, setUserParticipations] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
+  const [friendIds, setFriendIds] = useState([]);
+  const [roomParticipantUids, setRoomParticipantUids] = useState({});
+  const [withFriendsOnly, setWithFriendsOnly] = useState(false);
+  const [anyFriendLive, setAnyFriendLive] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -84,32 +85,6 @@ export default function JoinRoom() {
     { label: t('time2300'), start: 23 },
     { label: t('time00plus'), start: 24 }, 
   ];
-
- const formatDateTimeShort = (dateVal, timeStr) => {
-    if (!dateVal) return t('unknown');
-    
-    let dateObj;
-
-    // 1. Handle New Data (Firestore Timestamp)
-    if (dateVal.toDate) {
-      dateObj = dateVal.toDate();
-    } 
-    // 2. Handle Old Data (String)
-    else if (typeof dateVal === 'string' && timeStr) {
-      dateObj = new Date(`${dateVal}T${timeStr}`);
-    } else {
-      return t('unknown');
-    }
-
-    return dateObj.toLocaleString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
-  };
 
   const openFilterModal = () => {
     setTempName(activeName);
@@ -177,9 +152,12 @@ export default function JoinRoom() {
 
       if (!user || !user.emailVerified) {
         setRooms([]);
+        setFriendIds([]);
         setLoading(false);
         return;
       }
+
+      getFriendIds(user.uid).then(setFriendIds).catch(() => setFriendIds([]));
 
       const roomsRef = collection(db, 'rooms');
 
@@ -198,26 +176,10 @@ export default function JoinRoom() {
             // 1. Safety Check: If no date, skip
             if (!date) continue;
 
-            let eventDateTime;
-
-            // 2. DATA TYPE CHECK (Crucial for your transition)
-            if (date.toDate) {
-                // Case A: It's a Firestore Timestamp (New Rooms)
-                eventDateTime = date.toDate();
-            } else if (typeof date === 'string' && time) {
-                // Case B: It's a String (Old Rooms)
-                // We combine the date string + time string to get the start time
-                eventDateTime = new Date(`${date}T${time}`);
-            } else {
-                continue; // Skip invalid data
-            }
+            if (!parseRoomDateTime(date, time)) continue;
 
             // 3. THE 24-HOUR RULE
-            // We calculate the exact moment 24 hours AFTER the meeting starts
-            const expiryDateTime = new Date(eventDateTime.getTime() + (24 * 60 * 60 * 1000));
-
-            // 4. Check if the room has expired
-            if (now > expiryDateTime) {
+            if (isRoomExpired(date, time, now)) {
               // If I am the creator, delete it from the database to clean up
               if (createdBy === user.uid) {
                 try {
@@ -231,8 +193,8 @@ export default function JoinRoom() {
               continue;
             }
 
-            // 5. If not expired, show it (but hide my own rooms from the "Join" list)
-            if (createdBy !== user.uid) {
+            // 5. Hide my own rooms; respect public/private visibility
+            if (createdBy !== user.uid && canViewRoom(room, user.uid, friendIds)) {
               filteredRooms.push(room);
             }
           }
@@ -242,17 +204,23 @@ export default function JoinRoom() {
           filteredRooms.forEach((room) => {
             const participantsRef = collection(db, 'rooms', room.id, 'participants');
             const participantUnsub = onSnapshot(participantsRef, (participantSnapshot) => {
-              const participants = participantSnapshot.docs.map(doc => doc.data());
-              const isUserParticipant = participants.some(p => p.uid === user.uid);
+              const participants = participantSnapshot.docs.map((participantDoc) => participantDoc.data());
+              const isUserParticipant = participants.some((p) => p.uid === user.uid);
+              const participantUids = participants.map((p) => p.uid).filter(Boolean);
 
               setParticipantCounts((prev) => ({
                 ...prev,
-                [room.id]: participantSnapshot.docs.length
+                [room.id]: participantSnapshot.docs.length,
               }));
 
               setUserParticipations((prev) => ({
                 ...prev,
-                [room.id]: isUserParticipant
+                [room.id]: isUserParticipant,
+              }));
+
+              setRoomParticipantUids((prev) => ({
+                ...prev,
+                [room.id]: participantUids,
               }));
             });
             participantUnsubscribes.push(participantUnsub);
@@ -273,15 +241,48 @@ export default function JoinRoom() {
       if (unsubscribe) unsubscribe();
       participantUnsubscribes.forEach(unsub => unsub());
     };
-  }, []);
+  }, [friendIds.join(',')]);
+
+  // Watch friends' live status for the green dot on the map button
+  useEffect(() => {
+    if (friendIds.length === 0) {
+      setAnyFriendLive(false);
+      return;
+    }
+    const chunks = [];
+    for (let i = 0; i < friendIds.length; i += 10) {
+      chunks.push(friendIds.slice(i, i + 10));
+    }
+    // Track per-chunk live status, merge into single boolean
+    const chunkLive = new Array(chunks.length).fill(false);
+    const unsubscribers = chunks.map((chunk, idx) =>
+      onSnapshot(
+        query(collection(db, 'users'), where('__name__', 'in', chunk)),
+        (snap) => {
+          chunkLive[idx] = snap.docs.some((d) => isOutTonight(d.data()));
+          setAnyFriendLive(chunkLive.some(Boolean));
+        }
+      )
+    );
+    return () => unsubscribers.forEach((u) => u());
+  }, [friendIds.join(',')]); 
 
   const availableRooms = useMemo(() => {
+    const friendIdSet = new Set(friendIds);
+
     let filtered = rooms.filter((room) => {
       const max = room.maxParticipants || 0;
       const current = participantCounts[room.id] || 0;
       const isUserInRoom = userParticipations[room.id] || false;
-      
-      if (current >= max || isUserInRoom) return false;
+
+      if (max > 0 && current >= max) return false;
+      if (isUserInRoom) return false;
+
+      if (withFriendsOnly) {
+        const participantUids = roomParticipantUids[room.id] || [];
+        const hasFriendInRoom = participantUids.some((uid) => friendIdSet.has(uid));
+        if (!hasFriendInRoom) return false;
+      }
 
       if (activeName && !room.name.toLowerCase().includes(activeName.toLowerCase())) return false;
 
@@ -342,12 +343,25 @@ export default function JoinRoom() {
       }
       return 0;
     });
-  }, [rooms, participantCounts, userParticipations, activeName, activeCities, activeLocations, activeDay, activeTimeStart]);
+  }, [
+    rooms,
+    participantCounts,
+    userParticipations,
+    roomParticipantUids,
+    friendIds,
+    withFriendsOnly,
+    activeName,
+    activeCities,
+    activeLocations,
+    activeDay,
+    activeTimeStart,
+  ]);
 
-  const handleRequest = async (roomId, requests = []) => {
+  const handleRequest = async (room) => {
     if (!currentUser) return;
+    if (!canViewRoom(room, currentUser.uid, friendIds)) return;
     try {
-      const roomRef = doc(db, 'rooms', roomId);
+      const roomRef = doc(db, 'rooms', room.id);
       await updateDoc(roomRef, {
         requests: arrayUnion(currentUser.uid),
         requestTimestamps: { [currentUser.uid]: serverTimestamp() }
@@ -382,7 +396,7 @@ export default function JoinRoom() {
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="time-outline" size={14} color={BeerColors.iconPrimary} />
-            <Text style={styles.time}>{formatDateTimeShort(item.date, item.time)}</Text>
+            <Text style={styles.time}>{formatDateTimeShort(item.date, item.time, { unknownLabel: t('unknown') })}</Text>
           </View>
         </View>
 
@@ -401,7 +415,7 @@ export default function JoinRoom() {
               style={styles.joinButton}
               onPress={(e) => {
                 e.stopPropagation();
-                handleRequest(item.id, item.requests || []);
+                handleRequest(item);
               }}
             >
               <Text style={styles.joinButtonText}>{t('join')}</Text>
@@ -415,13 +429,6 @@ export default function JoinRoom() {
   if (loading || !currentUser) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
-          </Pressable>
-          <Text style={styles.headerTitle}>{t('joinAMeetup')} 🍻</Text>
-          <View style={{width: 40}} /> 
-        </View>
         <View style={{flex:1, justifyContent:'center', alignItems:'center'}}>
           <Text style={styles.emptyText}>{t('loading')}</Text>
         </View>
@@ -432,10 +439,24 @@ export default function JoinRoom() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
+        <Pressable
+          style={[styles.withFriendsButton, withFriendsOnly && styles.withFriendsButtonActive]}
+          onPress={() => setWithFriendsOnly((prev) => !prev)}
+        >
+          <Ionicons
+            name="people"
+            size={16}
+            color={withFriendsOnly ? BeerColors.onAccent : BeerColors.iconPrimary}
+          />
+          <Text
+            style={[
+              styles.withFriendsButtonText,
+              withFriendsOnly && styles.withFriendsButtonTextActive,
+            ]}
+          >
+            {t('withFriends')}
+          </Text>
         </Pressable>
-        <Text style={styles.headerTitle}>{t('joinAMeetup')} 🍻</Text>
         <Pressable style={styles.filterIconBtn} onPress={openFilterModal}>
           <Ionicons name="filter" size={24} color={BeerColors.iconPrimary} />
         </Pressable>
@@ -560,6 +581,7 @@ export default function JoinRoom() {
                setActiveLocations([]);
                setActiveDay(null);
                setActiveTimeStart(null);
+               setWithFriendsOnly(false);
              }}
           >
             <Text style={{color: BeerColors.textPrimary, marginTop: 10}}>{t('clearFilters')}</Text>
@@ -574,6 +596,12 @@ export default function JoinRoom() {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* Live Map FAB */}
+      <Pressable style={styles.liveMapFab} onPress={() => router.push('/live-map')}>
+        <Ionicons name="globe-outline" size={26} color={BeerColors.onAccent} />
+        {anyFriendLive ? <View style={styles.liveMapFabDot} /> : null}
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -592,9 +620,58 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     backgroundColor: BeerColors.background,
   },
-  backButton: { padding: 4 },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary },
   filterIconBtn: { padding: 8, backgroundColor: BeerColors.panelSoft, borderRadius: 8, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  liveMapFab: {
+    position: 'absolute',
+    bottom: 110,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: BeerColors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  liveMapFabDot: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#4CAF50',
+    borderWidth: 2,
+    borderColor: BeerColors.accent,
+  },
+  withFriendsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: BeerColors.panelElevated,
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  withFriendsButtonActive: {
+    backgroundColor: BeerColors.accent,
+    borderColor: BeerColors.accent,
+  },
+  withFriendsButtonText: {
+    color: BeerColors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  withFriendsButtonTextActive: {
+    color: BeerColors.onAccent,
+    fontWeight: 'bold',
+  },
   flatListContent: { paddingBottom: 100 },
   card: {
     backgroundColor: BeerColors.panel,
@@ -621,13 +698,13 @@ const styles = StyleSheet.create({
   time: { fontSize: 13, color: BeerColors.textSecondary, marginLeft: 4 },
   countContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   peopleCount: { fontSize: 14, fontWeight: 'bold', color: BeerColors.textPrimary, marginLeft: 4 },
-  joinButton: { backgroundColor: BeerColors.panelElevated, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: BeerColors.borderSoft },
-  joinButtonText: { color: BeerColors.textPrimary, fontWeight: 'bold', fontSize: 12 },
+  joinButton: { backgroundColor: BeerColors.accent, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: BeerColors.accent },
+  joinButtonText: { color: BeerColors.onAccent, fontWeight: 'bold', fontSize: 12 },
   requestedBadge: { backgroundColor: BeerColors.panelSoft, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1, borderColor: BeerColors.borderSoft },
   requestedText: { fontSize: 11, color: BeerColors.textSecondary, fontWeight: '600' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: BeerColors.textPrimary, fontSize: 16 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: BeerColors.overlay, justifyContent: 'flex-end' },
   modalContent: { backgroundColor: BeerColors.panel, borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, height: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: BeerColors.textPrimary },
@@ -636,12 +713,12 @@ const styles = StyleSheet.create({
   chipScroll: { flexDirection: 'row', marginBottom: 5 },
   wrapContainer: { flexDirection: 'row', flexWrap: 'wrap' },
   chip: { backgroundColor: BeerColors.panelElevated, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: BeerColors.borderSoft },
-  chipActive: { backgroundColor: BeerColors.panelSoft },
+  chipActive: { backgroundColor: BeerColors.accent, borderColor: BeerColors.accent },
   chipText: { color: BeerColors.textSecondary, fontSize: 12, textTransform: 'capitalize' },
-  chipTextActive: { color: BeerColors.textPrimary, fontWeight: 'bold' },
+  chipTextActive: { color: BeerColors.onAccent, fontWeight: 'bold' },
   modalFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, marginBottom: 20 },
   clearButton: { flex: 0.3, padding: 15, borderRadius: 12, alignItems: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: BeerColors.borderSoft },
   clearButtonText: { color: BeerColors.textPrimary, fontWeight: 'bold' },
-  applyButton: { flex: 0.65, backgroundColor: BeerColors.panelElevated, padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
-  applyButtonText: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: 'bold' },
+  applyButton: { flex: 0.65, backgroundColor: BeerColors.accent, padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: BeerColors.accent },
+  applyButtonText: { color: BeerColors.onAccent, fontSize: 16, fontWeight: 'bold' },
 });

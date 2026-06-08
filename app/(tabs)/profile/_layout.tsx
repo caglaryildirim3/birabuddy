@@ -1,0 +1,13 @@
+import { Stack } from 'expo-router';
+import BeerColors from '../../../constants/BeerColors';
+
+export default function ProfileLayout() {
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: BeerColors.background },
+      }}
+    />
+  );
+}

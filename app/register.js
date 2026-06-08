@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import BeerColors from '../constants/BeerColors';
 import { auth, db } from '../firebase/firebaseConfig';
+import { cleanInstagramHandle, isInstagramHandle, setLoginHandle } from '../utils/authUtils';
 
 export default function Register() {
   const { t } = useTranslation();
@@ -419,12 +420,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
     return emailRegex.test(email);
   };
 
-  const validateInstagramUsername = (username) => {
-    if (username.length < 2) return false;
-    if (username.length > 30) return false;
-    const instagramRegex = /^[a-zA-Z0-9._]+$/;
-    return instagramRegex.test(username);
-  };
+  const validateInstagramUsername = (username) => isInstagramHandle(username);
 
   const validatePassword = (password) => {
     if (password.length < 6) return false;
@@ -433,7 +429,7 @@ Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
 
 const handleRegister = async () => {
     const trimmedEmail = email.trim();
-    const trimmedInstagramUsername = instagramUsername.trim();
+    const trimmedInstagramUsername = cleanInstagramHandle(instagramUsername);
 
     if (!trimmedEmail || !password || !trimmedInstagramUsername) {
       Alert.alert(t('missingFields'), t('missingFieldsRegister'));
@@ -538,6 +534,12 @@ const handleRegister = async () => {
           termsAcceptanceDate: new Date(),
           termsVersion: '1.0'
         });
+
+        await setLoginHandle({
+          handle: trimmedInstagramUsername,
+          email: trimmedEmail,
+          uid: userCredential.user.uid,
+        });
       } catch (firestoreError) {
         console.log('Firestore error (non-critical):', firestoreError);
       }
@@ -545,16 +547,7 @@ const handleRegister = async () => {
       console.log('Signing out user...');
       await signOut(auth);
 
-      Alert.alert(
-        t('accountCreatedSuccess'),
-        t('verificationSentTo', { email: trimmedEmail }),
-        [
-          {
-            text: t('gotIt'),
-            onPress: () => router.push('/login')
-          }
-        ]
-      );
+      router.push('/login');
 
     } catch (error) {
       console.log('Registration error:', error);
@@ -801,7 +794,7 @@ const styles = StyleSheet.create({
   },
   agreementsContainer: {
     marginBottom: 16,
-    backgroundColor: 'rgba(78, 4, 225, 0.2)',
+    backgroundColor: BeerColors.panelSoft,
     padding: 12,
     borderRadius: 8,
   },
@@ -834,7 +827,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   checkboxChecked: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: BeerColors.accent,
+    borderColor: BeerColors.accent,
   },
   checkmark: {
     color: BeerColors.textPrimary,
@@ -848,7 +842,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   button: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: BeerColors.accent,
     padding: 14,
     borderRadius: 10,
     alignItems: 'center',
@@ -859,12 +853,12 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: BeerColors.textPrimary,
+    color: BeerColors.onAccent,
     fontSize: 16,
     fontWeight: 'bold',
   },
   infoBox: {
-    backgroundColor: 'rgba(78, 4, 225, 0.3)',
+    backgroundColor: BeerColors.panelSoft,
     padding: 12,
     borderRadius: 8,
     marginBottom: 20,
@@ -885,7 +879,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: BeerColors.overlayHeavy,
   },
   modalContent: {
     backgroundColor: BeerColors.panel,
@@ -917,24 +911,24 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   modalCloseButton: {
-    backgroundColor: '#666',
+    backgroundColor: BeerColors.textMuted,
     padding: 12,
     borderRadius: 8,
     flex: 0.45,
   },
   modalAcceptButton: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: BeerColors.accent,
     padding: 12,
     borderRadius: 8,
     flex: 0.45,
   },
   modalCloseText: {
-    color: '#fff',
+    color: BeerColors.white,
     textAlign: 'center',
     fontWeight: 'bold',
   },
   modalAcceptText: {
-    color: BeerColors.textPrimary,
+    color: BeerColors.onAccent,
     textAlign: 'center',
     fontWeight: 'bold',
   },

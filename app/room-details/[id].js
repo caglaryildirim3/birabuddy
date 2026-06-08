@@ -1,4 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
+import {
+  IconCalendar,
+  IconClock,
+  IconMapPin,
+  IconMessageCircle,
+  IconSchool,
+} from '@tabler/icons-react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   addDoc,
@@ -34,9 +41,13 @@ import {
   View
 } from 'react-native';
 import UserProfile from '../../components/UserProfile';
+import { isOutTonight } from '../../utils/outTonightUtils';
 import { auth, db } from '../../firebase/firebaseConfig';
 import { useButtonDelay } from '../../hooks/useButtonDelay';
 import BeerColors from '../../constants/BeerColors';
+import { getFriendIds } from '../../utils/friendUtils';
+import { parseRoomDateTime } from '../../utils/dateUtils';
+import { canRequestJoinRoom, canViewRoom, isRoomExpired } from '../../utils/roomUtils';
 
 export default function RoomDetails() {
   const { id } = useLocalSearchParams();
@@ -50,13 +61,14 @@ export default function RoomDetails() {
   const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
   const [selectedUserProfile, setSelectedUserProfile] = useState(null);
   const [showUserProfile, setShowUserProfile] = useState(false);
-  const [reportModalVisible, setReportModalVisible] = useState(false);
-  const [reportedUser, setReportedUser] = useState(null);
-  const [reportReason, setReportReason] = useState('');
+  const [friendIds, setFriendIds] = useState([]);
+  const [inviteFriends, setInviteFriends] = useState([]);
+  const [invitingId, setInvitingId] = useState(null);
 
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [showChat, setShowChat] = useState(false);
+  const [lastReadAt, setLastReadAt] = useState(0);
   const flatListRef = useRef(null);
 
   // Helper: Check if room is full
@@ -97,26 +109,37 @@ export default function RoomDetails() {
 
   const getDisplayLocation = () => {
     if (!room) return 'Not specified';
+    const neighborhood = room.neighborhood || room.location;
+    const city = room.city;
+
     if (isParticipant || isCreator) {
-      if (room.barName && room.neighborhood) return `${room.barName}, ${room.neighborhood}`;
+      if (room.barName && neighborhood) return `${room.barName}, ${neighborhood}`;
       if (room.fullLocation) return room.fullLocation;
-      return room.location || 'Location details shared';
-    } else {
-      if (room.neighborhood) return `${room.neighborhood} (exact location hidden)`;
-      return 'Location shared after joining';
+      if (neighborhood && city) return `${neighborhood}, ${city}`;
+      return neighborhood || 'Location details shared';
     }
+
+    if (neighborhood && city) return `${neighborhood}, ${city}`;
+    if (neighborhood) return neighborhood;
+    return 'Location shared after joining';
   };
 
   useEffect(() => {
-    if (!id || !isParticipant || !showChat) return;
+    if (!id || !isParticipant) return;
     const messagesRef = collection(db, 'rooms', id, 'messages');
     const q = query(messagesRef, orderBy('createdAt'));
-    const unsubscribe = onSnapshot(q, snapshot => {
-      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map((messageDoc) => ({ id: messageDoc.id, ...messageDoc.data() }));
       setMessages(msgs);
     });
     return () => unsubscribe();
-  }, [id, isParticipant, showChat]);
+  }, [id, isParticipant]);
+
+  useEffect(() => {
+    if (showChat) {
+      setLastReadAt(Date.now());
+    }
+  }, [showChat, messages.length]);
 
   const handleSend = async () => {
     if (message.trim() === '') return;
@@ -192,14 +215,114 @@ export default function RoomDetails() {
     return auth.currentUser.uid === room.createdBy;
   }, [auth.currentUser?.uid, room?.createdBy]);
 
+  const canAccessRoom = useMemo(() => {
+    if (!room || !auth.currentUser?.uid) return false;
+    return canViewRoom(room, auth.currentUser.uid, friendIds);
+  }, [room, friendIds, auth.currentUser?.uid]);
+
+  const canJoinRoom = useMemo(() => {
+    if (!room || !auth.currentUser?.uid) return false;
+    return canRequestJoinRoom(room, auth.currentUser.uid, friendIds);
+  }, [room, friendIds, auth.currentUser?.uid]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      setFriendIds([]);
+      return;
+    }
+    getFriendIds(uid).then(setFriendIds).catch(() => setFriendIds([]));
+  }, [auth.currentUser?.uid]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!isParticipant || !uid || friendIds.length === 0) {
+      setInviteFriends([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadInviteFriends = async () => {
+      const eligibleIds = friendIds.filter(
+        (friendUid) =>
+          friendUid !== uid &&
+          !participantIdSet.has(friendUid) &&
+          !requestIdSet.has(friendUid)
+      );
+
+      const friends = [];
+      for (const friendUid of eligibleIds) {
+        try {
+          const userSnap = await getDoc(doc(db, 'users', friendUid));
+          if (!userSnap.exists()) continue;
+          const data = userSnap.data();
+          friends.push({
+            uid: friendUid,
+            nickname: data.instagram || data.nickname || data.name || 'Friend',
+            major: data.major || '',
+            invited: invitedIdSet.has(friendUid),
+          });
+        } catch (e) {
+          // skip failed profile fetch
+        }
+      }
+
+      if (!cancelled) {
+        friends.sort((a, b) => a.nickname.localeCompare(b.nickname));
+        setInviteFriends(friends);
+      }
+    };
+
+    loadInviteFriends();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isParticipant,
+    friendIds,
+    participantIdSet,
+    requestIdSet,
+    invitedIdSet,
+    auth.currentUser?.uid,
+  ]);
+
   const formattedDate = useMemo(() => formatDateString(room?.date), [room?.date]);
   const formattedTime = useMemo(() => formatTimeString(room?.time), [room?.time]);
 
+  const capacityFill = useMemo(() => {
+    const max = room?.maxParticipants || 0;
+    if (!max) return 0;
+    return Math.min(participants.length / max, 1);
+  }, [participants.length, room?.maxParticipants]);
+
+  const hasUnreadMessages = useMemo(() => {
+    if (!isParticipant || showChat) return false;
+    const currentUid = auth.currentUser?.uid;
+    return messages.some((msg) => {
+      if (msg.uid === currentUid) return false;
+      const msgTime = msg.createdAt?.toDate?.()?.getTime?.() || 0;
+      return msgTime > lastReadAt;
+    });
+  }, [messages, lastReadAt, isParticipant, showChat]);
+
+  const friendIdSet = useMemo(() => new Set(friendIds), [friendIds]);
+  const participantIdSet = useMemo(
+    () => new Set(participants.map((p) => p.uid)),
+    [participants]
+  );
+  const requestIdSet = useMemo(
+    () => new Set(joinRequests.map((r) => r.uid)),
+    [joinRequests]
+  );
+  const invitedIdSet = useMemo(() => new Set(room?.invites || []), [room?.invites]);
+
   const handleUserProfileClick = useCallback((uid) => {
-    if (uid === auth.currentUser?.uid) return;
+    if (!uid) return;
     setSelectedUserProfile(uid);
     setShowUserProfile(true);
-  }, [auth.currentUser?.uid]);
+  }, []);
 
   const closeUserProfile = useCallback(() => {
     setShowUserProfile(false);
@@ -212,7 +335,7 @@ export default function RoomDetails() {
     const unsubscribeRoom = onSnapshot(roomRef, async (docSnap) => {
       if (!docSnap.exists()) {
         Alert.alert('Room Not Found', 'This room no longer exists.', [
-          { text: 'OK', onPress: () => router.replace('/my-rooms') }
+          { text: 'OK', onPress: () => router.replace('/(tabs)/feed') }
         ]);
         return;
       }
@@ -223,24 +346,16 @@ export default function RoomDetails() {
       const now = new Date();
       const { date, time } = roomData;
       if (date) {
-         let startDateTime;
-         if (date.toDate) {
-             startDateTime = date.toDate();
-         } else if (typeof date === 'string' && time) {
-             startDateTime = new Date(`${date}T${time}`);
-         }
-         
-         if (startDateTime) {
-             const expiry = new Date(startDateTime.getTime() + 24 * 60 * 60 * 1000);
-             if (expiry < now) {
-                 Alert.alert('Room Expired', 'This meetup has ended.', [
-                     { text: 'OK', onPress: () => router.replace('/my-rooms') }
-                 ]);
-                 if (roomData.createdBy === auth.currentUser?.uid) {
-                     deleteDoc(roomRef).catch(err => console.log('Auto-delete failed', err));
-                 }
-                 return; 
+         const startDateTime = parseRoomDateTime(date, time);
+
+         if (startDateTime && isRoomExpired(date, time, now)) {
+             Alert.alert('Room Expired', 'This meetup has ended.', [
+                 { text: 'OK', onPress: () => router.replace('/(tabs)/feed') }
+             ]);
+             if (roomData.createdBy === auth.currentUser?.uid) {
+                 deleteDoc(roomRef).catch(err => console.log('Auto-delete failed', err));
              }
+             return;
          }
       }
 
@@ -280,8 +395,13 @@ export default function RoomDetails() {
               const userData = userDoc.exists() ? userDoc.data() : {};
               const nickname = userData.instagram || userData.nickname || `User-${data.uid.substr(0,5)}`;
               const major = userData.major || 'Not specified';
-              return { uid: data.uid, nickname, major };
-            } catch (e) { return { uid: data.uid, nickname: 'Unknown User', major: '' }; }
+              return {
+                uid: data.uid,
+                nickname,
+                major,
+                isOutTonight: isOutTonight(userData),
+              };
+            } catch (e) { return { uid: data.uid, nickname: 'Unknown User', major: '', isOutTonight: false }; }
           }));
           setParticipants(list.filter(p => p !== null));
         } catch (e) {}
@@ -316,6 +436,7 @@ export default function RoomDetails() {
 
   const handleRequestJoin = async () => {
     if (!auth.currentUser) return Alert.alert('Error', 'Login required');
+    if (!canJoinRoom) return;
     try {
       const roomRef = doc(db, 'rooms', id);
       await updateDoc(roomRef, {
@@ -336,7 +457,6 @@ export default function RoomDetails() {
           });
       }
 
-      Alert.alert('Success', 'Request sent!');
     } catch (e) { Alert.alert('Error', 'Failed to send request'); }
   };
 
@@ -357,37 +477,13 @@ export default function RoomDetails() {
     ]);
   };
 
-  const handleReportUser = (participant) => {
-    setReportedUser(participant);
-    setReportModalVisible(true);
-  };
-
-  const submitReport = async () => {
-    if (!reportReason.trim()) return Alert.alert('Error', 'Please provide a reason');
-    try {
-      await addDoc(collection(db, 'reports'), {
-        reportedUserId: reportedUser.uid,
-        reportedUserNickname: reportedUser.nickname,
-        reporterUserId: auth.currentUser.uid,
-        roomId: id,
-        reason: reportReason,
-        createdAt: serverTimestamp(),
-        status: 'pending'
-      });
-      Alert.alert('Report Submitted', 'Thank you.');
-      setReportModalVisible(false);
-      setReportedUser(null);
-      setReportReason('');
-    } catch (e) { Alert.alert('Error', 'Failed to submit report'); }
-  };
-
   const handleDeleteRoom = async () => {
     Alert.alert('Delete Room', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
           try {
             await deleteDoc(doc(db, 'rooms', id));
-            router.replace('/my-rooms');
+            router.replace('/(tabs)/feed');
           } catch (e) { Alert.alert('Error', 'Failed to delete room'); }
         }
       }
@@ -426,6 +522,42 @@ export default function RoomDetails() {
     } catch (e) { Alert.alert('Error', 'Failed to decline'); }
   };
 
+  const handleInviteFriend = async (friend) => {
+    if (!auth.currentUser || friend.invited || invitingId || isRoomFull) return;
+
+    setInvitingId(friend.uid);
+    try {
+      const userSnap = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const inviterName = userSnap.exists()
+        ? userSnap.data().instagram || userSnap.data().nickname || userSnap.data().name || 'A friend'
+        : 'A friend';
+
+      const roomRef = doc(db, 'rooms', id);
+      await updateDoc(roomRef, {
+        invites: arrayUnion(friend.uid),
+      });
+
+      await addDoc(collection(db, 'notifications'), {
+        userId: friend.uid,
+        type: 'invite',
+        title: 'Room Invite',
+        message: `${inviterName} invited you to join "${room?.name || 'a room'}"`,
+        roomId: id,
+        createdAt: serverTimestamp(),
+        read: false,
+        senderId: auth.currentUser.uid,
+      });
+
+      setInviteFriends((prev) =>
+        prev.map((f) => (f.uid === friend.uid ? { ...f, invited: true } : f))
+      );
+    } catch (e) {
+      Alert.alert('Error', 'Failed to send invite');
+    } finally {
+      setInvitingId(null);
+    }
+  };
+
   if (!room) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -437,6 +569,81 @@ export default function RoomDetails() {
     );
   }
 
+  if (!canAccessRoom) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <View style={styles.loadingCard}>
+          <Text style={styles.privateRoomIcon}>🔒</Text>
+          <Text style={styles.loadingText}>This is a private room</Text>
+          <Text style={styles.privateRoomSubtext}>Only the host's friends can view it.</Text>
+          <Pressable style={styles.privateRoomBackButton} onPress={() => router.back()}>
+            <Text style={styles.privateRoomBackText}>Go back</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const currentUid = auth.currentUser?.uid;
+
+  const renderPersonCard = ({
+    person,
+    isHost = false,
+    isSelf = false,
+    onPress,
+    rightAction,
+  }) => {
+    const isFriend = friendIdSet.has(person.uid);
+    const initial = (person.nickname || 'A').charAt(0).toUpperCase();
+
+    return (
+      <View
+        key={person.uid}
+        style={[styles.personCard, isHost && styles.personCardHost]}
+      >
+        <Pressable
+          style={styles.personCardMain}
+          onPress={onPress}
+          disabled={!onPress}
+        >
+          <View style={styles.personAvatar}>
+            <Text style={styles.personAvatarText}>{initial}</Text>
+          </View>
+          <View style={styles.personInfo}>
+            <View style={styles.personNameRow}>
+              <Text style={styles.personName}>{person.nickname || 'Anonymous'}</Text>
+              {isHost ? (
+                <View style={styles.inlineTag}>
+                  <Text style={styles.inlineTagText}>host 👑</Text>
+                </View>
+              ) : null}
+              {isSelf ? (
+                <View style={[styles.inlineTag, styles.inlineTagYou]}>
+                  <Text style={styles.inlineTagText}>you</Text>
+                </View>
+              ) : null}
+              {person.isOutTonight ? <View style={styles.liveDot} /> : null}
+            </View>
+            <View style={styles.personSubtitleRow}>
+              {person.major ? (
+                <>
+                  <IconSchool size={14} color={BeerColors.textMuted} />
+                  <Text style={styles.personMajor}>{person.major}</Text>
+                </>
+              ) : null}
+              {isFriend ? (
+                <View style={styles.friendTag}>
+                  <Text style={styles.friendTagText}>friend</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        </Pressable>
+        {rightAction}
+      </View>
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
@@ -444,32 +651,24 @@ export default function RoomDetails() {
       keyboardVerticalOffset={0}
     >
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <View style={styles.headerLeft}>
-              <Pressable style={styles.backButton} onPress={() => router.back()}>
-                <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
+        <View style={styles.topBar}>
+          <Pressable style={styles.backButtonCircle} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={22} color={BeerColors.textPrimary} />
+          </Pressable>
+
+          <View style={styles.topBarRight}>
+            {isCreator ? (
+              <Pressable style={styles.deleteIconButton} onPress={handleDeleteRoom}>
+                <Ionicons name="trash-outline" size={20} color={BeerColors.danger} />
               </Pressable>
-              <View style={styles.titleContainer}>
-                <Text style={styles.title} numberOfLines={1}>{room?.name || 'Untitled Room'}</Text>
-                <Text style={styles.subtitle}>{participants.length}/{room?.maxParticipants || '?'} participants</Text>
-              </View>
-            </View>
-            <View style={styles.headerRight}>
-              {isParticipant && (
-                <Pressable 
-                  style={[styles.chatToggleButton, showChat && styles.chatToggleButtonActive]} 
-                  onPress={() => setShowChat(!showChat)}
-                >
-                  <Ionicons name={showChat ? "list" : "chatbubbles"} size={20} color={BeerColors.textPrimary} />
-                </Pressable>
-              )}
-              {isCreator && (
-                <Pressable style={styles.deleteButton} onPress={handleDeleteRoom}>
-                   <Ionicons name="trash-outline" size={20} color={BeerColors.textPrimary} />
-                </Pressable>
-              )}
-            </View>
+            ) : null}
+            {isParticipant ? (
+              <Pressable style={styles.chatPill} onPress={() => setShowChat(true)}>
+                {hasUnreadMessages ? <View style={styles.chatUnreadDot} /> : null}
+                <IconMessageCircle size={18} color={BeerColors.textPrimary} />
+                <Text style={styles.chatPillText}>Chat</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
@@ -529,180 +728,189 @@ export default function RoomDetails() {
           </KeyboardAvoidingView>
         </Modal>
 
-        <ScrollView 
+        <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={true}
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.infoCard}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>room details 🍺</Text>
-              {isCreator && (
-                <View style={styles.creatorBadge}>
-                  <Text style={styles.creatorBadgeText}>👑 Host</Text>
-                </View>
-              )}
+          {/* Hero */}
+          <View style={styles.heroSection}>
+            <Text style={styles.heroTitle}>{room?.name || 'Untitled Room'}</Text>
+
+            <View style={styles.metaPillRow}>
+              <View style={styles.metaPill}>
+                <IconCalendar size={15} color={BeerColors.textSecondary} />
+                <Text style={styles.metaPillText}>{formattedDate}</Text>
+              </View>
+              <View style={styles.metaPill}>
+                <IconClock size={15} color={BeerColors.textSecondary} />
+                <Text style={styles.metaPillText}>{formattedTime}</Text>
+              </View>
             </View>
-            
-            <View style={styles.infoGrid}>
-              <View style={styles.infoItem}>
-                 <Ionicons name="location-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Location</Text>
-                  <Text style={styles.infoValue}>{getDisplayLocation()}</Text>
-                </View>
-              </View>
 
-              <View style={styles.infoItem}>
-                 <Ionicons name="calendar-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Date</Text>
-                  <Text style={styles.infoValue}>{formattedDate}</Text>
-                </View>
-              </View>
-              
-              <View style={styles.infoItem}>
-                <Ionicons name="time-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Time</Text>
-                  <Text style={styles.infoValue}>{formattedTime}</Text>
-                </View>
-              </View>
-              
-              <View style={styles.infoItem}>
-                <Ionicons name="people-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Capacity</Text>
-                  <Text style={styles.infoValue}>{participants.length}/{room?.maxParticipants || 0}</Text>
-                </View>
-              </View>
+            <View style={styles.locationRow}>
+              <IconMapPin size={16} color={BeerColors.accent} />
+              <Text style={styles.locationText}>{getDisplayLocation()}</Text>
+            </View>
 
-              {room?.description && (
-                <View style={styles.infoItem}>
-                   <Ionicons name="document-text-outline" size={20} color={BeerColors.iconPrimary} style={{marginRight:10}} />
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Description</Text>
-                    <Text style={styles.infoValue}>{room.description}</Text>
-                  </View>
-                </View>
-              )}
+            {room?.description ? (
+              <View style={styles.descriptionBox}>
+                <Text style={styles.descriptionText}>{room.description}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          {/* Capacity */}
+          <View style={styles.capacitySection}>
+            <View style={styles.capacityHeader}>
+              <Text style={styles.capacityLabel}>Participants</Text>
+              <View style={styles.capacityBadge}>
+                <Text style={styles.capacityBadgeText}>
+                  {participants.length} / {room?.maxParticipants || 0}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.capacityTrack}>
+              <View
+                style={[styles.capacityFill, { width: `${capacityFill * 100}%` }]}
+              />
             </View>
           </View>
 
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>👥 Participants</Text>
-              <View style={styles.participantCount}>
-                <Text style={styles.participantCountText}>{participants.length}</Text>
-              </View>
-            </View>
-            
-            <View style={styles.participantsList}>
-              {participants.length > 0 ? (
-                participants.map((p, index) => (
-                  <View key={p.uid} style={[styles.participantCard, index === 0 && styles.firstParticipantCard]}>
-                    <View style={styles.participantLeft}>
-                      <View style={styles.participantAvatar}>
-                        <Text style={styles.participantAvatarText}>{(p.nickname || 'A').charAt(0).toUpperCase()}</Text>
-                      </View>
-                      <View style={styles.participantInfo}>
-                        <Pressable onPress={() => handleUserProfileClick(p.uid)}>
-                          <View style={styles.participantNameContainer}>
-                            <Text style={[styles.participantName, styles.clickableUsername]}>
-                              {p.nickname || 'Anonymous'}
-                              {p.uid === room.createdBy && <Text style={styles.hostBadge}> 👑</Text>}
-                              {p.uid === auth.currentUser?.uid && <Text style={styles.youBadge}> (You)</Text>}
-                            </Text>
-                            {isParticipant && p.uid !== auth.currentUser?.uid && (
-                              <Pressable style={styles.reportButton} onPress={() => handleReportUser(p)}>
-                                <Ionicons name="alert-circle-outline" size={24} color={BeerColors.danger} />
-                              </Pressable>
-                            )}
-                          </View>
-                          {p.major && <Text style={styles.participantMajor}>🎓 {p.major}</Text>}
-                        </Pressable>
-                      </View>
-                    </View>
-                    {isCreator && p.uid !== auth.currentUser?.uid && (
-                      <Pressable style={styles.kickButton} onPress={() => handleKickParticipant(p)}>
+          {/* Participants */}
+          <Text style={styles.sectionLabel}>in the room</Text>
+          <View style={styles.cardsList}>
+            {participants.length > 0 ? (
+              participants.map((p) =>
+                renderPersonCard({
+                  person: p,
+                  isHost: p.uid === room.createdBy,
+                  isSelf: p.uid === currentUid,
+                  onPress: p.uid !== currentUid ? () => handleUserProfileClick(p.uid) : undefined,
+                  rightAction:
+                    isCreator && p.uid !== currentUid ? (
+                      <Pressable
+                        style={styles.kickButton}
+                        onPress={() => handleKickParticipant(p)}
+                      >
                         <Text style={styles.kickButtonText}>Remove</Text>
                       </Pressable>
-                    )}
-                  </View>
-                ))
-              ) : (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyIcon}>👻</Text>
-                  <Text style={styles.emptyText}>No participants yet</Text>
-                </View>
-              )}
-            </View>
+                    ) : null,
+                })
+              )
+            ) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>No participants yet</Text>
+              </View>
+            )}
           </View>
 
-          {isCreator && (
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📋 Join Requests</Text>
-                {joinRequests.length > 0 && (
-                  <View style={styles.requestCount}>
-                    <Text style={styles.requestCountText}>{joinRequests.length}</Text>
+          {/* Invite friends (participants only) */}
+          {isParticipant && !isRoomFull ? (
+            <>
+              <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>invite friends</Text>
+              <Text style={styles.inviteSubtext}>
+                Invite friends to view the room and request to join
+              </Text>
+              <View style={styles.cardsList}>
+                {inviteFriends.length > 0 ? (
+                  inviteFriends.map((friend) =>
+                    renderPersonCard({
+                      person: { ...friend, isOutTonight: false },
+                      onPress: () => handleUserProfileClick(friend.uid),
+                      rightAction: (
+                        <Pressable
+                          style={[
+                            styles.inviteButton,
+                            friend.invited && styles.inviteButtonDisabled,
+                          ]}
+                          disabled={friend.invited || invitingId === friend.uid}
+                          onPress={() => handleInviteFriend(friend)}
+                        >
+                          {invitingId === friend.uid ? (
+                            <ActivityIndicator size="small" color={BeerColors.onAccent} />
+                          ) : (
+                            <Text
+                              style={[
+                                styles.inviteButtonText,
+                                friend.invited && styles.inviteButtonTextDisabled,
+                              ]}
+                            >
+                              {friend.invited ? 'Invited' : 'Invite'}
+                            </Text>
+                          )}
+                        </Pressable>
+                      ),
+                    })
+                  )
+                ) : (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyText}>No friends available to invite</Text>
                   </View>
                 )}
               </View>
-              
-              {joinRequests.length > 0 && (
-                <Pressable style={styles.approveAllButton} onPress={async () => { for (const r of joinRequests) await handleApprove(r); }}>
-                  <Text style={styles.approveAllText}>✅ Approve All ({joinRequests.length})</Text>
-                </Pressable>
-              )}
+            </>
+          ) : null}
 
-              <View style={styles.requestsList}>
+          {/* Join requests (host only) */}
+          {isCreator ? (
+            <>
+              <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>join requests</Text>
+              {joinRequests.length > 0 ? (
+                <Pressable
+                  style={styles.approveAllButton}
+                  onPress={async () => {
+                    for (const r of joinRequests) await handleApprove(r);
+                  }}
+                >
+                  <Text style={styles.approveAllText}>Approve all ({joinRequests.length})</Text>
+                </Pressable>
+              ) : null}
+              <View style={styles.cardsList}>
                 {joinRequests.length > 0 ? (
-                  joinRequests.map((r) => (
-                    <View key={r.uid} style={styles.requestCard}>
-                      <View style={styles.requestLeft}>
-                        <View style={styles.requestAvatar}>
-                          <Text style={styles.requestAvatarText}>{(r.nickname || 'A').charAt(0).toUpperCase()}</Text>
-                        </View>
-                        <View style={styles.requestInfo}>
-                          <Pressable onPress={() => handleUserProfileClick(r.uid)}>
-                            <Text style={[styles.requestName, styles.clickableUsername]}>{r.nickname || 'Anonymous'}</Text>
-                            {r.major && <Text style={styles.requestMajor}>🎓 {r.major}</Text>}
-                          </Pressable>
-                        </View>
-                      </View>
-                      <View style={styles.requestActions}>
-                        <Pressable 
+                  joinRequests.map((r) =>
+                    renderPersonCard({
+                      person: { ...r, isOutTonight: false },
+                      onPress: () => handleUserProfileClick(r.uid),
+                      rightAction: (
+                        <View style={styles.requestActions}>
+                          <Pressable
                             style={[
-                                styles.approveButton, 
-                                isRoomFull && styles.approveButtonDisabled 
-                            ]} 
+                              styles.approveButton,
+                              isRoomFull && styles.approveButtonDisabled,
+                            ]}
                             disabled={isRoomFull}
                             onPress={() => handleApprove(r)}
-                        >
-                          <Ionicons name="checkmark" size={20} color={BeerColors.white} />
-                        </Pressable>
-                        <Pressable style={styles.declineButton} onPress={() => handleDecline(r)}>
-                          <Ionicons name="close" size={20} color={BeerColors.white} />
-                        </Pressable>
-                      </View>
-                    </View>
-                  ))
+                          >
+                            <Ionicons name="checkmark" size={18} color={BeerColors.white} />
+                          </Pressable>
+                          <Pressable
+                            style={styles.declineButton}
+                            onPress={() => handleDecline(r)}
+                          >
+                            <Ionicons name="close" size={18} color={BeerColors.white} />
+                          </Pressable>
+                        </View>
+                      ),
+                    })
+                  )
                 ) : (
                   <View style={styles.emptyState}>
-                    <Text style={styles.emptyIcon}>📪</Text>
                     <Text style={styles.emptyText}>No pending requests</Text>
                   </View>
                 )}
               </View>
-            </View>
-          )}
+            </>
+          ) : null}
 
-          {!isParticipant && !isCreator && (
+          {!isParticipant && !isCreator && canJoinRoom && (
             <View style={styles.section}>
               <View style={styles.joinPrompt}>
                 <Text style={styles.joinPromptIcon}>🍻</Text>
                 <Text style={styles.joinPromptText}>Want to join this room?</Text>
+                {room?.invites?.includes(currentUid) ? (
+                  <Text style={styles.invitedHint}>You were invited to this room</Text>
+                ) : null}
                 {hasRequestedJoin ? (
                   <View style={styles.pendingContainer}>
                     <View style={styles.pendingBadge}>
@@ -726,74 +934,6 @@ export default function RoomDetails() {
           {selectedUserProfile && <UserProfile uid={selectedUserProfile} onClose={closeUserProfile} />}
         </Modal>
 
-        <Modal visible={reportModalVisible} transparent={true} animationType="fade">
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <KeyboardAvoidingView 
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-              style={styles.reportModalOverlay}
-            >
-              <TouchableWithoutFeedback>
-                <View style={styles.reportModalContainer}>
-                  <View style={styles.reportModalHeader}>
-                    <Text style={styles.reportModalTitle}>Report User</Text>
-                    <Pressable 
-                      style={styles.reportModalClose} 
-                      onPress={() => { 
-                        setReportModalVisible(false); 
-                        setReportedUser(null); 
-                        setReportReason(''); 
-                      }}
-                    >
-                      <Ionicons name="close" size={20} color={BeerColors.textPrimary} />
-                    </Pressable>
-                  </View>
-                  
-                  <Text style={styles.reportModalSubtitle}>
-                    Reporting: {reportedUser?.nickname || 'User'}
-                  </Text>
-                  
-                  <TextInput
-                    style={styles.reportReasonInput}
-                    placeholder="Describe the issue..."
-                    placeholderTextColor={BeerColors.textMuted}
-                    value={reportReason}
-                    onChangeText={setReportReason}
-                    multiline={true}
-                    maxLength={500}
-                    blurOnSubmit={true}
-                    returnKeyType="done"
-                    onSubmitEditing={Keyboard.dismiss}
-                  />
-                  
-                  <View style={styles.reportModalButtons}>
-                    <Pressable 
-                      style={styles.reportCancelButton} 
-                      onPress={() => { 
-                        setReportModalVisible(false); 
-                        setReportedUser(null); 
-                        setReportReason(''); 
-                      }}
-                    >
-                      <Text style={styles.reportCancelButtonText}>Cancel</Text>
-                    </Pressable>
-                    
-                    <Pressable 
-                      style={[
-                        styles.reportSubmitButton, 
-                        !reportReason.trim() && styles.reportSubmitButtonDisabled
-                      ]} 
-                      onPress={submitReport} 
-                      disabled={!reportReason.trim()}
-                    >
-                      <Text style={styles.reportSubmitButtonText}>Submit</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              </TouchableWithoutFeedback>
-            </KeyboardAvoidingView>
-          </TouchableWithoutFeedback>
-        </Modal>
-
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -804,74 +944,390 @@ const styles = StyleSheet.create({
   loadingContainer: { flex: 1, backgroundColor: BeerColors.background, justifyContent: 'center', alignItems: 'center' },
   loadingCard: { backgroundColor: BeerColors.panel, padding: 32, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
   loadingText: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: '500', marginTop: 16 },
-  header: { backgroundColor: BeerColors.background, borderBottomWidth: 1, borderBottomColor: BeerColors.borderSoft, paddingTop: Platform.OS === 'ios' ? 0 : 10 },
-  headerContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  backButton: { padding: 8, marginRight: 12 },
-  titleContainer: { flex: 1, marginRight: 12 },
-  title: { color: BeerColors.textPrimary, fontSize: 20, fontWeight: 'bold', marginBottom: 2 },
-  subtitle: { color: BeerColors.textSecondary, fontSize: 14, fontWeight: '400' },
-  headerRight: { flexDirection: 'row', gap: 8 },
-  chatToggleButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: BeerColors.panelSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
-  chatToggleButtonActive: { backgroundColor: BeerColors.panelElevated },
-  deleteButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: BeerColors.panelSoft, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
-  scrollView: { flex: 1 },
-  scrollContent: { flexGrow: 1, paddingBottom: 100 },
-  infoCard: { backgroundColor: BeerColors.panel, marginHorizontal: 20, marginTop: 20, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: BeerColors.borderSoft, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 3 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  cardTitle: { color: BeerColors.textPrimary, fontSize: 20, fontWeight: 'bold' },
-  creatorBadge: { backgroundColor: BeerColors.panelElevated, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: BeerColors.borderSoft },
-  creatorBadgeText: { color: BeerColors.textPrimary, fontSize: 12, fontWeight: 'bold' },
-  infoGrid: { gap: 16 },
-  infoItem: { flexDirection: 'row', alignItems: 'flex-start' },
-  infoContent: { flex: 1 },
-  infoLabel: { color: BeerColors.textSecondary, fontSize: 14, fontWeight: '600', marginBottom: 2 },
-  infoValue: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: '400', lineHeight: 22 },
-  section: { marginHorizontal: 20, marginTop: 24 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  sectionTitle: { color: BeerColors.textPrimary, fontSize: 18, fontWeight: 'bold' },
-  participantCount: { backgroundColor: BeerColors.panelSoft, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  participantCountText: { color: BeerColors.textPrimary, fontSize: 14, fontWeight: '600' },
-  requestCount: { backgroundColor: BeerColors.panelSoft, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  requestCountText: { color: BeerColors.textPrimary, fontSize: 14, fontWeight: 'bold' },
-  participantsList: { gap: 12 },
-  participantCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#3A6A6F' },
-  firstParticipantCard: { borderWidth: 2, borderColor: '#E1B604' },
-  participantLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  participantAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  participantAvatarText: { color: '#E8D5DA', fontSize: 18, fontWeight: 'bold' },
-  participantInfo: { flex: 1 },
-  participantNameContainer: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
-  participantName: { color: '#4d4c41', fontSize: 16, fontWeight: '600' },
-  clickableUsername: { textDecorationLine: 'underline' },
-  hostBadge: { color: '#E1B604', fontWeight: 'bold' },
-  youBadge: { color: '#E1B604', fontWeight: 'bold' },
-  participantMajor: { color: '#666', fontSize: 14 },
-  
-  // UPDATED REPORT BUTTON STYLE
-  reportButton: { 
-    marginLeft: 8, 
-    padding: 6,
-    backgroundColor: 'rgba(198, 40, 40, 0.1)',
-    borderRadius: 8
+  privateRoomIcon: { fontSize: 40 },
+  privateRoomSubtext: {
+    color: BeerColors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
-  
-  kickButton: { backgroundColor: '#C62828', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  kickButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  approveAllButton: { backgroundColor: '#E1B604', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
-  approveAllText: { color: '#E8D5DA', fontSize: 14, fontWeight: 'bold' },
-  requestsList: { gap: 12 },
-  requestCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#E1B604' },
-  requestLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  requestAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  requestAvatarText: { color: '#E1B604', fontSize: 18, fontWeight: 'bold' },
-  requestInfo: { flex: 1 },
-  requestName: { color: '#4d4c41', fontSize: 16, fontWeight: '600' },
-  requestMajor: { color: '#666', fontSize: 14 },
-  requestActions: { flexDirection: 'row', gap: 8 },
-  approveButton: { backgroundColor: '#E1B604', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
-  approveButtonDisabled: { backgroundColor: '#999', opacity: 0.6 },
-  declineButton: { backgroundColor: '#C62828', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  privateRoomBackButton: {
+    marginTop: 20,
+    backgroundColor: BeerColors.accent,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  privateRoomBackText: {
+    color: BeerColors.onAccent,
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+
+  // Top bar
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  backButtonCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: BeerColors.panelElevated,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  deleteIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(229, 57, 53, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 57, 53, 0.25)',
+  },
+  chatPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: BeerColors.panelElevated,
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+    position: 'relative',
+  },
+  chatUnreadDot: {
+    position: 'absolute',
+    top: 6,
+    left: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+    borderWidth: 1.5,
+    borderColor: BeerColors.panelElevated,
+  },
+  chatPillText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: BeerColors.textPrimary,
+  },
+
+  scrollView: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingHorizontal: 20, paddingBottom: 100 },
+
+  // Hero
+  heroSection: {
+    marginTop: 4,
+    marginBottom: 24,
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: BeerColors.textPrimary,
+    letterSpacing: -0.5,
+    marginBottom: 14,
+  },
+  metaPillRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  metaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: BeerColors.panelElevated,
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  metaPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: BeerColors.textPrimary,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  locationText: {
+    flex: 1,
+    fontSize: 15,
+    color: BeerColors.textSecondary,
+    fontWeight: '500',
+  },
+  descriptionBox: {
+    backgroundColor: BeerColors.panelElevated,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  descriptionText: {
+    fontSize: 15,
+    color: BeerColors.textPrimary,
+    lineHeight: 22,
+  },
+
+  // Capacity
+  capacitySection: {
+    marginBottom: 28,
+  },
+  capacityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  capacityLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: BeerColors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  capacityBadge: {
+    backgroundColor: BeerColors.panelSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  capacityBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: BeerColors.textPrimary,
+  },
+  capacityTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: BeerColors.panelElevated,
+    overflow: 'hidden',
+  },
+  capacityFill: {
+    height: '100%',
+    backgroundColor: BeerColors.accent,
+    borderRadius: 2,
+  },
+
+  // Sections
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: BeerColors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  sectionLabelSpaced: {
+    marginTop: 8,
+  },
+  cardsList: {
+    gap: 10,
+    marginBottom: 24,
+  },
+
+  // Person cards
+  personCard: {
+    backgroundColor: BeerColors.panel,
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  personCardHost: {
+    borderColor: BeerColors.accent,
+    backgroundColor: BeerColors.panelSoft,
+  },
+  personCardMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  personAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: BeerColors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  personAvatarText: {
+    color: BeerColors.onAccent,
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  personInfo: {
+    flex: 1,
+  },
+  personNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  personName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: BeerColors.textPrimary,
+  },
+  inlineTag: {
+    backgroundColor: BeerColors.panelElevated,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  inlineTagYou: {
+    backgroundColor: BeerColors.panelSoft,
+    borderColor: BeerColors.accent,
+  },
+  inlineTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: BeerColors.textSecondary,
+    textTransform: 'lowercase',
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+  },
+  personSubtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  personMajor: {
+    fontSize: 13,
+    color: BeerColors.textMuted,
+  },
+  friendTag: {
+    backgroundColor: BeerColors.panelSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BeerColors.accent,
+  },
+  friendTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: BeerColors.accentDark,
+    textTransform: 'lowercase',
+  },
+
+  inviteSubtext: {
+    color: BeerColors.textMuted,
+    fontSize: 13,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  inviteButton: {
+    backgroundColor: BeerColors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginLeft: 8,
+    minWidth: 72,
+    alignItems: 'center',
+  },
+  inviteButtonDisabled: {
+    backgroundColor: BeerColors.panelElevated,
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  inviteButtonText: {
+    color: BeerColors.onAccent,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  inviteButtonTextDisabled: {
+    color: BeerColors.textMuted,
+  },
+  invitedHint: {
+    color: BeerColors.accentDark,
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  kickButton: {
+    backgroundColor: BeerColors.danger,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  kickButtonText: {
+    color: BeerColors.white,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  approveAllButton: {
+    backgroundColor: BeerColors.accent,
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  approveAllText: {
+    color: BeerColors.onAccent,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  requestActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginLeft: 8,
+  },
+  approveButton: {
+    backgroundColor: BeerColors.accent,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  approveButtonDisabled: {
+    backgroundColor: BeerColors.disabled,
+    opacity: 0.6,
+  },
+  declineButton: {
+    backgroundColor: BeerColors.danger,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   chatContainer: { flex: 1, backgroundColor: BeerColors.background },
   chatHeader: { backgroundColor: BeerColors.panel, paddingTop: Platform.OS === 'ios' ? 20 : 10, borderBottomWidth: 1, borderBottomColor: BeerColors.borderSoft },
   chatHeaderContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
@@ -896,32 +1352,26 @@ const styles = StyleSheet.create({
   inputWrapper: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, gap: 12 },
   input: { flex: 1, backgroundColor: BeerColors.panelElevated, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12, color: BeerColors.textPrimary, fontSize: 15, maxHeight: 100, borderWidth: 1, borderColor: BeerColors.borderSoft },
   inputDisabled: { opacity: 0.6 },
-  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: BeerColors.panelElevated, borderWidth: 1, borderColor: BeerColors.borderSoft, justifyContent: 'center', alignItems: 'center' },
+  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: BeerColors.accent, borderWidth: 1, borderColor: BeerColors.accent, justifyContent: 'center', alignItems: 'center' },
   sendButtonDisabled: { backgroundColor: BeerColors.panelSoft },
-  joinPrompt: { backgroundColor: '#E8D5DA', padding: 24, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#3A6A6F' },
+  section: { marginTop: 8 },
+  joinPrompt: { backgroundColor: BeerColors.panelElevated, padding: 24, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: BeerColors.borderSoft },
   joinPromptIcon: { fontSize: 32, marginBottom: 12 },
-  joinPromptText: { color: '#4d4c41', fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
-  joinButton: { backgroundColor: '#E1B604', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, minWidth: 180, alignItems: 'center' },
-  joinButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  joinPromptText: { color: BeerColors.textPrimary, fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
+  joinButton: { backgroundColor: BeerColors.accent, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, minWidth: 180, alignItems: 'center' },
+  joinButtonText: { color: BeerColors.onAccent, fontSize: 16, fontWeight: 'bold' },
   pendingContainer: { alignItems: 'center', gap: 12 },
-  pendingBadge: { backgroundColor: '#E1B604', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16 },
-  pendingText: { color: '#E1B604', fontSize: 14, fontWeight: 'bold' },
+  pendingBadge: { backgroundColor: BeerColors.panelSoft, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: BeerColors.accent },
+  pendingText: { color: BeerColors.accentDark, fontSize: 14, fontWeight: 'bold' },
   cancelRequestButton: { paddingHorizontal: 16, paddingVertical: 8 },
-  cancelRequestButtonText: { color: '#C62828', fontSize: 14, fontWeight: '500', textDecorationLine: 'underline' },
-  emptyState: { alignItems: 'center', padding: 32, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16 },
-  emptyIcon: { fontSize: 32, marginBottom: 8 },
-  emptyText: { color: '#E8D5DA', fontSize: 16, opacity: 0.7 },
-  reportModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  reportModalContainer: { backgroundColor: '#5A4B5C', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, borderWidth: 1, borderColor: '#7A6B7D' },
-  reportModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  reportModalTitle: { color: '#E8A4C7', fontSize: 20, fontWeight: 'bold' },
-  reportModalClose: { padding: 4 },
-  reportModalSubtitle: { color: '#E8D5DA', fontSize: 16, marginBottom: 20, textAlign: 'center' },
-  reportReasonInput: { backgroundColor: '#4A3B47', borderRadius: 12, padding: 16, color: '#E8D5DA', fontSize: 15, minHeight: 120, textAlignVertical: 'top', borderWidth: 1, borderColor: '#7A6B7D', marginBottom: 24 },
-  reportModalButtons: { flexDirection: 'row', gap: 12 },
-  reportCancelButton: { flex: 1, backgroundColor: '#7A6B7D', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  reportCancelButtonText: { color: '#E8D5DA', fontSize: 16, fontWeight: 'bold' },
-  reportSubmitButton: { flex: 1, backgroundColor: '#C62828', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  reportSubmitButtonDisabled: { opacity: 0.5 },
-  reportSubmitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  cancelRequestButtonText: { color: BeerColors.danger, fontSize: 14, fontWeight: '500', textDecorationLine: 'underline' },
+  emptyState: {
+    alignItems: 'center',
+    padding: 28,
+    backgroundColor: BeerColors.panelElevated,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: BeerColors.borderSoft,
+  },
+  emptyText: { color: BeerColors.textMuted, fontSize: 14 },
 });

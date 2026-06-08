@@ -1,45 +1,103 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
-import React from 'react';
-import { Platform } from 'react-native';
-
-import { HapticTab } from '@/components/HapticTab';
-import { IconSymbol } from '@/components/ui/IconSymbol';
-import TabBarBackground from '@/components/ui/TabBarBackground';
-import { Colors } from '@/constants/Colors';
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { Platform, StyleSheet } from 'react-native';
+import { CenterFabButton } from '../../components/CenterFabButton';
+import { HapticTab } from '../../components/HapticTab';
+import { OutTonightProvider } from '../../contexts/OutTonightContext';
+import { useTheme } from '../../contexts/ThemeContext';
+import { PostModalProvider } from '../../contexts/PostModalContext';
+import { useIncomingFriendRequestCount } from '../../hooks/useIncomingFriendRequestCount';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const incomingFriendRequests = useIncomingFriendRequestCount();
+  const { colors } = useTheme();
 
   return (
+    <OutTonightProvider>
+    <PostModalProvider>
     <Tabs
+      initialRouteName="feed"
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textMuted,
         tabBarButton: HapticTab,
-        tabBarBackground: TabBarBackground,
-        tabBarStyle: Platform.select({
-          ios: {
-            // Use a transparent background on iOS to show the blur effect
-            position: 'absolute',
-          },
-          default: {},
-        }),
+        tabBarStyle: [styles.tabBar, { backgroundColor: colors.panel, borderTopColor: colors.accent }],
+        tabBarLabelStyle: styles.tabBarLabel,
+        sceneStyle: { backgroundColor: colors.background },
       }}>
       <Tabs.Screen
-        name="index"
+        name="feed"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          title: 'Feed',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="discover"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'Discover',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="search-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="fab"
+        options={{
+          title: '',
+          tabBarLabel: () => null,
+          tabBarIcon: () => null,
+          tabBarButton: (props) => <CenterFabButton {...props} />,
+        }}
+        listeners={{
+          tabPress: (e) => {
+            e.preventDefault();
+          },
+        }}
+      />
+      <Tabs.Screen
+        name="my-rooms"
+        options={{
+          title: 'My Rooms',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="beer-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarBadge: incomingFriendRequests > 0 ? incomingFriendRequests : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" size={size} color={color} />
+          ),
         }}
       />
     </Tabs>
+    </PostModalProvider>
+    </OutTonightProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  tabBar: {
+    borderTopWidth: 1,
+    height: Platform.OS === 'ios' ? 88 : 68,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+    ...Platform.select({
+      ios: {
+        position: 'absolute',
+      },
+      default: {},
+    }),
+  },
+  tabBarLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+});

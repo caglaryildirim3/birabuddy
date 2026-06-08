@@ -1,0 +1,81 @@
+export const DRINKS = [
+  {
+    category: 'Beer',
+    emoji: '🍺',
+    types: [
+      'Draft beer',
+      'Bottled beer',
+      'Craft beer',
+      'Wheat beer',
+      'Mexican beer',
+      'Efes',
+      'Bomonti',
+      'Dark beer',
+    ],
+  },
+  {
+    category: 'Shots',
+    emoji: '🥃',
+    types: [
+      'Vodka',
+      'Tequila',
+      'Whiskey',
+      'Rum',
+      'Gin',
+      'Jägermeister',
+      'Sambuca',
+      'Fernet',
+      'Rakı shot',
+    ],
+  },
+  {
+    category: 'Cocktails',
+    emoji: '🍹',
+    types: [
+      'Mojito',
+      'Margarita',
+      'Gin & Tonic',
+      'Negroni',
+      'Aperol Spritz',
+      'Long Island Iced Tea',
+      'Cosmopolitan',
+      'Daiquiri',
+      'Old Fashioned',
+      'Whiskey Sour',
+      'Espresso Martini',
+      'Bloody Mary',
+      'Moscow Mule',
+      'Pina Colada',
+      'Sex on the Beach',
+    ],
+  },
+  {
+    category: 'Rakı',
+    emoji: '🥛',
+    types: ['Rakı straight', 'Rakı with water', 'Rakı with ice'],
+  },
+  {
+    category: 'Wine',
+    emoji: '🍷',
+    types: [
+      'Red wine',
+      'White wine',
+      'Rosé',
+      'Prosecco',
+      'Sparkling wine',
+      'Natural wine',
+      'Champagne',
+    ],
+  },
+  {
+    category: 'Spirits',
+    emoji: '🥃',
+    types: ['Vodka', 'Whiskey', 'Bourbon', 'Rum', 'Gin', 'Tequila', 'Cognac'],
+  },
+  {
+    category: 'Other',
+    emoji: '🫧',
+  },
+];
+
+export const OTHER_DRINK_TYPE_LIMIT = 40;

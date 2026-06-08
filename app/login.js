@@ -1,89 +1,84 @@
 import { Link, useRouter } from 'expo-router';
 import { sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { auth, db } from '../firebase/firebaseConfig';
 import BeerColors from '../constants/BeerColors';
+import { auth, db } from '../firebase/firebaseConfig';
+import { ensureLoginHandleForUser, resolveLoginEmail } from '../utils/authUtils';
 
 export default function Login() {
   const { t } = useTranslation();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const router = useRouter();
 
-  // ✅ VALIDATION: Accepts .edu.tr OR .edu
-  const validateEmail = (email) => {
-    const emailLower = email.toLowerCase().trim();
-    
-    const isEduTr = emailLower.endsWith('.edu.tr');
-    const isEdu = emailLower.endsWith('.edu');
-
-    if (!isEduTr && !isEdu) {
-      return false;
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(emailLower);
+  const getLoginErrorMessage = (error) => {
+    if (error.code === 'missing-identifier') return t('enterIdentifierAndPassword');
+    if (error.code === 'invalid-email') return t('yourEmailMustEnd');
+    if (error.code === 'invalid-instagram') return t('invalidInstagramLogin');
+    if (error.code === 'user-not-found') return t('noAccountFoundRegister');
+    return t('loginFailed');
   };
 
   const handleForgotPassword = async () => {
-    const trimmedEmail = email.trim();
-    
-    if (!trimmedEmail) {
-      Alert.alert(t('emailRequired'), t('enterStudentEmail'));
-      return;
-    }
-
-    if (!validateEmail(trimmedEmail)) {
-      Alert.alert(t('invalidEmail'), t('validUniversityEmail'));
+    if (!identifier.trim()) {
+      Alert.alert(t('emailRequired'), t('enterLoginIdentifier'));
       return;
     }
 
     setForgotLoading(true);
     try {
-      await sendPasswordResetEmail(auth, trimmedEmail);
-      Alert.alert(t('resetEmailSent'), t('checkYourInbox', { email: trimmedEmail }));
+      const resolvedEmail = await resolveLoginEmail(identifier);
+      await sendPasswordResetEmail(auth, resolvedEmail);
     } catch (error) {
-      let msg = t('failedToSendReset');
-      if (error.code === 'auth/user-not-found') msg = t('noAccountFound');
-      Alert.alert(t('error'), msg);
+      if (error.code === 'missing-identifier' || error.code === 'invalid-email' || error.code === 'invalid-instagram') {
+        Alert.alert(t('error'), getLoginErrorMessage(error));
+      } else {
+        let msg = t('failedToSendReset');
+        if (error.code === 'auth/user-not-found' || error.code === 'user-not-found') {
+          msg = t('noAccountFound');
+        }
+        Alert.alert(t('error'), msg);
+      }
     } finally {
       setForgotLoading(false);
     }
   };
 
   const handleResendVerification = async () => {
-    const trimmedEmail = email.trim();
-    
-    if (!trimmedEmail || !password) {
-      Alert.alert(t('missingInfo'), t('enterEmailPassword'));
+    if (!identifier.trim() || !password) {
+      Alert.alert(t('missingInfo'), t('enterIdentifierAndPassword'));
       return;
     }
 
     setResendLoading(true);
     try {
-      // We must sign in to send the email
-      const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
-      
+      const resolvedEmail = await resolveLoginEmail(identifier);
+      const userCredential = await signInWithEmailAndPassword(auth, resolvedEmail, password);
+
       if (userCredential.user.emailVerified) {
-        Alert.alert(t('alreadyVerified'), t('emailAlreadyVerified'));
+        router.replace('/(tabs)/feed');
       } else {
         await sendEmailVerification(userCredential.user);
         await signOut(auth);
-        Alert.alert(t('sent'), t('verificationEmailSent'));
       }
     } catch (error) {
       console.log('Resend error:', error);
+      if (error.code === 'missing-identifier' || error.code === 'invalid-email' || error.code === 'invalid-instagram' || error.code === 'user-not-found') {
+        Alert.alert(t('error'), getLoginErrorMessage(error));
+        return;
+      }
+
       let msg = t('couldNotSendEmail');
-      
       if (error.code === 'auth/user-not-found') msg = t('noAccountWithEmail');
       else if (error.code === 'auth/wrong-password') msg = t('wrongPassword');
       else if (error.code === 'auth/too-many-requests') msg = t('tooManyAttempts');
-      
+
       Alert.alert(t('error'), msg);
     } finally {
       setResendLoading(false);
@@ -91,60 +86,55 @@ export default function Login() {
   };
 
   const handleLogin = async () => {
-    const trimmedEmail = email.trim();
-
-    if (!trimmedEmail || !password) {
-      Alert.alert(t('missingFields'), t('enterEmailAndPassword'));
-      return;
-    }
-
-    if (!validateEmail(trimmedEmail)) {
-      Alert.alert(t('invalidEmail'), t('yourEmailMustEnd'));
+    if (!identifier.trim() || !password) {
+      Alert.alert(t('missingFields'), t('enterIdentifierAndPassword'));
       return;
     }
 
     setLoading(true);
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
-      
-      // Refresh user data to check verification status
+      const resolvedEmail = await resolveLoginEmail(identifier);
+      const userCredential = await signInWithEmailAndPassword(auth, resolvedEmail, password);
+
       await userCredential.user.reload();
-      
+
       if (!userCredential.user.emailVerified) {
         await signOut(auth);
-        Alert.alert(
-          t('emailNotVerified'),
-          t('pleaseVerifyEmail'),
-          [
-            { text: t('ok') },
-            { text: t('resendEmail'), onPress: handleResendVerification }
-          ]
-        );
+        Alert.alert(t('emailNotVerified'), t('pleaseVerifyEmail'), [
+          { text: t('ok') },
+          { text: t('resendEmail'), onPress: handleResendVerification },
+        ]);
         return;
       }
 
-      // Update last login
       try {
-        await updateDoc(doc(db, 'users', userCredential.user.uid), {
+        const userRef = doc(db, 'users', userCredential.user.uid);
+        const userSnap = await getDoc(userRef);
+        await updateDoc(userRef, {
           lastLogin: new Date(),
-          emailVerified: true
+          emailVerified: true,
         });
+        if (userSnap.exists()) {
+          await ensureLoginHandleForUser(userCredential.user.uid, userSnap.data());
+        }
       } catch (e) {
         console.log('Firestore update ignored');
       }
 
-      router.replace('/');
-
+      router.replace('/(tabs)/feed');
     } catch (error) {
       console.log('Login error:', error);
+
+      if (error.code === 'missing-identifier' || error.code === 'invalid-email' || error.code === 'invalid-instagram' || error.code === 'user-not-found') {
+        Alert.alert(t('loginFailed'), getLoginErrorMessage(error));
+        return;
+      }
+
       let msg = t('loginFailed');
-      
-      // ✅ THIS IS THE UPDATE FOR BANNED USERS
       if (error.code === 'auth/user-disabled') {
         msg = t('accountDisabled');
-      } 
-      else if (error.code === 'auth/user-not-found') {
+      } else if (error.code === 'auth/user-not-found') {
         msg = t('noAccountFoundRegister');
       } else if (error.code === 'auth/wrong-password') {
         msg = t('incorrectPassword');
@@ -153,7 +143,7 @@ export default function Login() {
       } else if (error.code === 'auth/too-many-requests') {
         msg = t('accountLocked');
       }
-      
+
       Alert.alert(t('loginFailed'), msg);
     } finally {
       setLoading(false);
@@ -163,18 +153,18 @@ export default function Login() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{t('appName')}</Text>
-      
+
       <TextInput
         style={styles.input}
-        placeholder={t('studentEmailPlaceholder')}
+        placeholder={t('loginIdentifierPlaceholder')}
         placeholderTextColor={BeerColors.textMuted}
-        value={email}
-        onChangeText={setEmail}
+        value={identifier}
+        onChangeText={setIdentifier}
         autoCapitalize="none"
-        keyboardType="email-address"
-        autoComplete="email"
+        autoCorrect={false}
+        autoComplete="username"
       />
-      
+
       <TextInput
         style={styles.input}
         placeholder={t('passwordPlaceholder')}
@@ -184,29 +174,27 @@ export default function Login() {
         secureTextEntry
         autoComplete="password"
       />
-      
-      {/* Main Login Button */}
-      <Pressable 
-        style={[styles.button, loading && styles.buttonDisabled]} 
+
+      <Pressable
+        style={[styles.button, loading && styles.buttonDisabled]}
         onPress={handleLogin}
         disabled={loading}
       >
-        {loading ? <ActivityIndicator color={BeerColors.white} /> : <Text style={styles.buttonText}>{t('logIn')}</Text>}
+        {loading ? (
+          <ActivityIndicator color={BeerColors.onAccent} />
+        ) : (
+          <Text style={styles.buttonText}>{t('logIn')}</Text>
+        )}
       </Pressable>
 
-      {/* ✅ HELPER LINKS - NOW VERTICAL */}
       <View style={styles.helperLinks}>
-        <Pressable 
-          style={styles.helperButton} 
-          onPress={handleForgotPassword}
-          disabled={forgotLoading}
-        >
+        <Pressable style={styles.helperButton} onPress={handleForgotPassword} disabled={forgotLoading}>
           <Text style={styles.helperText}>
             {forgotLoading ? t('sending') : t('forgotPassword')}
           </Text>
         </Pressable>
 
-        <Pressable 
+        <Pressable
           style={styles.helperButton}
           onPress={handleResendVerification}
           disabled={resendLoading}
@@ -223,7 +211,6 @@ export default function Login() {
         <View style={styles.dividerLine} />
       </View>
 
-      {/* Prominent Register Button */}
       <Link href="/register" asChild>
         <Pressable style={styles.registerButton}>
           <Text style={styles.registerButtonText}>{t('createNewAccount')}</Text>
@@ -258,27 +245,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   button: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: BeerColors.accent,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
-    marginBottom: 16, // Reduced from 20 to 16
+    marginBottom: 16,
   },
   buttonDisabled: {
     opacity: 0.7,
   },
   buttonText: {
-    color: BeerColors.textPrimary,
+    color: BeerColors.onAccent,
     fontSize: 16,
     fontWeight: 'bold',
   },
-  
-  /* ✅ UPDATED: Helper Links - Now Vertical */
   helperLinks: {
     alignItems: 'center',
     marginBottom: 24,
-    gap: 12, // Space between links
+    gap: 12,
   },
   helperButton: {
     paddingVertical: 8,
@@ -289,8 +274,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textDecorationLine: 'underline',
   },
-  
-  /* Divider Styles */
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -306,18 +289,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     fontSize: 14,
   },
-
-  /* Register Button Styles */
   registerButton: {
     backgroundColor: BeerColors.panel,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderWidth: 2,
+    borderColor: BeerColors.accent,
   },
   registerButtonText: {
-    color: BeerColors.textPrimary,
+    color: BeerColors.accent,
     fontSize: 16,
     fontWeight: '600',
   },

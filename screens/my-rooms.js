@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, SafeAreaView, RefreshControl, Alert } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl, Alert } from 'react-native';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, query, where, deleteDoc, doc } from 'firebase/firestore';
 import { db, auth } from '../firebase/firebaseConfig';
@@ -7,6 +7,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import BeerColors from '../constants/BeerColors';
+import { formatDateTimeShort, parseRoomDateTime } from '../utils/dateUtils';
+import { isRoomExpired } from '../utils/roomUtils';
 
 export default function MyRooms() {
   const { t } = useTranslation();
@@ -15,32 +17,6 @@ export default function MyRooms() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-
- const formatDateTimeShort = (dateVal, timeStr) => {
-    if (!dateVal) return t('unknown');
-    
-    let dateObj;
-
-    // 1. Handle New Data (Firestore Timestamp)
-    if (dateVal.toDate) {
-      dateObj = dateVal.toDate();
-    } 
-    // 2. Handle Old Data (String)
-    else if (typeof dateVal === 'string' && timeStr) {
-      dateObj = new Date(`${dateVal}T${timeStr}`);
-    } else {
-      return t('unknown');
-    }
-
-    return dateObj.toLocaleString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    }) + ' • ' + timeStr;
-  };
 
   useEffect(() => {
     let unsubscribe = null;
@@ -70,24 +46,9 @@ export default function MyRooms() {
             // Safety check
             if (!date) continue;
 
-            let eventDateTime;
+            if (!parseRoomDateTime(date, time)) continue;
 
-            // --- DATA TYPE CHECK START ---
-            if (date.toDate) {
-                // New Data (Timestamp)
-                eventDateTime = date.toDate();
-            } else if (typeof date === 'string' && time) {
-                // Old Data (String)
-                eventDateTime = new Date(`${date}T${time}`);
-            } else {
-                continue;
-            }
-            // --- DATA TYPE CHECK END ---
-
-            // Check 24-hour expiration
-            const expiryDateTime = new Date(eventDateTime.getTime() + 24 * 60 * 60 * 1000);
-            
-            if (expiryDateTime < now) {
+            if (isRoomExpired(date, time, now)) {
               // It's expired -> Delete from database
               try {
                 await deleteDoc(doc(db, 'rooms', room.id));
@@ -159,7 +120,7 @@ export default function MyRooms() {
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="time-outline" size={14} color={BeerColors.iconPrimary} />
-            <Text style={styles.time}>{formatDateTimeShort(item.date, item.time)}</Text>
+            <Text style={styles.time}>{formatDateTimeShort(item.date, item.time, { unknownLabel: t('unknown'), appendTime: true })}</Text>
           </View>
         </View>
 
@@ -175,31 +136,16 @@ export default function MyRooms() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
-          </Pressable>
-          <Text style={styles.title}>{t('myRooms')}</Text>
-          <View style={{width: 24}} />
-        </View>
+      <View style={styles.container}>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>{t('loading')}</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
-        </Pressable>
-        <Text style={styles.title}>{t('myRooms')}</Text>
-        <View style={{width: 24}} />
-      </View>
-
+    <View style={styles.container}>
       <FlatList
         data={myRooms}
         keyExtractor={(item) => item.id}
@@ -216,7 +162,7 @@ export default function MyRooms() {
           </View>
         }
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -225,16 +171,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BeerColors.background,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 10,
-    paddingHorizontal: 20,
-  },
-  backButton: { padding: 4 },
-  title: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary },
   scrollContent: { paddingBottom: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: BeerColors.textPrimary, fontSize: 16 },
@@ -305,6 +241,6 @@ const styles = StyleSheet.create({
   },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
   emptyTitle: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary, marginBottom: 10 },
-  createButton: { backgroundColor: BeerColors.panelElevated, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 12, borderWidth: 1, borderColor: BeerColors.borderSoft },
-  createButtonText: { color: BeerColors.textPrimary, fontSize: 16, fontWeight: 'bold' },
+  createButton: { backgroundColor: BeerColors.accent, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 12, borderWidth: 1, borderColor: BeerColors.accent },
+  createButtonText: { color: BeerColors.onAccent, fontSize: 16, fontWeight: 'bold' },
 });
