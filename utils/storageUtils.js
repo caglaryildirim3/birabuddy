@@ -10,6 +10,37 @@ function base64ToUint8Array(base64) {
   return bytes;
 }
 
+function uploadBytesViaXhr(uploadUrl, bytes, headers) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', uploadUrl);
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (error) {
+          reject(error);
+        }
+        return;
+      }
+
+      let message = `Upload failed (${xhr.status})`;
+      try {
+        const data = JSON.parse(xhr.responseText);
+        message = data?.error?.message || message;
+      } catch {
+        // ignore parse errors
+      }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error('Upload network error'));
+    xhr.send(bytes);
+  });
+}
+
 export async function uploadImageFromUri(_storage, path, uri, contentType = 'image/jpeg') {
   const user = auth.currentUser;
   if (!user) {
@@ -18,26 +49,23 @@ export async function uploadImageFromUri(_storage, path, uri, contentType = 'ima
 
   const idToken = await user.getIdToken();
   const base64 = await readAsStringAsync(uri, { encoding: 'base64' });
-  const body = base64ToUint8Array(base64);
+  const bytes = base64ToUint8Array(base64);
 
   const encodedPath = encodeURIComponent(path);
   const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o?uploadType=media&name=${encodedPath}`;
 
-  const response = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Firebase ${idToken}`,
-      'Content-Type': contentType,
-    },
-    body,
+  // Firebase JS SDK uploadBytes/uploadString both try to create Blobs, which
+  // React Native does not support. XHR + REST avoids that entirely.
+  const data = await uploadBytesViaXhr(uploadUrl, bytes, {
+    Authorization: `Firebase ${idToken}`,
+    'Content-Type': contentType,
   });
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error?.message || `Upload failed (${response.status})`);
+  const downloadToken = data.downloadTokens?.split(',')[0];
+  if (!downloadToken || !data.name) {
+    throw new Error('Upload succeeded but no download token returned');
   }
 
-  const downloadToken = data.downloadTokens?.split(',')[0];
   const objectPath = encodeURIComponent(data.name);
   return `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/${objectPath}?alt=media&token=${downloadToken}`;
 }

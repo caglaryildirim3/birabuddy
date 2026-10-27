@@ -1,15 +1,24 @@
 export function parseRoomDateTime(dateVal, timeStr) {
   if (!dateVal) return null;
 
+  let base = null;
+
   if (dateVal.toDate) {
-    return dateVal.toDate();
+    base = new Date(dateVal.toDate().getTime());
+  } else if (typeof dateVal === 'string') {
+    base = timeStr ? new Date(`${dateVal}T${timeStr}`) : new Date(dateVal);
   }
 
-  if (typeof dateVal === 'string' && timeStr) {
-    return new Date(`${dateVal}T${timeStr}`);
+  if (!base || Number.isNaN(base.getTime())) return null;
+
+  if (dateVal.toDate && timeStr && typeof timeStr === 'string') {
+    const [hours, minutes] = timeStr.split(':').map((v) => parseInt(v, 10));
+    if (!Number.isNaN(hours) && !Number.isNaN(minutes)) {
+      base.setHours(hours, minutes, 0, 0);
+    }
   }
 
-  return null;
+  return base;
 }
 
 export function formatRelativeTime(timestamp, labels = {}) {

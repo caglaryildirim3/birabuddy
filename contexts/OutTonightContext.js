@@ -1,8 +1,10 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import OutTonightModal from '../components/OutTonightModal';
 import { auth, db } from '../firebase/firebaseConfig';
+import { handleFirestoreListenerError } from '../utils/firestoreListenerUtils';
 import {
   clearOutTonightStatus,
   getOutTonightSinceLabel,
@@ -17,6 +19,7 @@ export function OutTonightProvider({ children }) {
   const [userData, setUserData] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState('create');
+  const openGoLiveRef = useRef(null);
 
   useEffect(() => {
     let userUnsub = null;
@@ -26,11 +29,18 @@ export function OutTonightProvider({ children }) {
       userUnsub = null;
       setUserData(null);
 
-      if (!user) return;
+      if (!user?.emailVerified) return;
 
-      userUnsub = onSnapshot(doc(db, 'users', user.uid), (snap) => {
-        setUserData(snap.exists() ? snap.data() : {});
-      });
+      userUnsub = onSnapshot(
+        doc(db, 'users', user.uid),
+        (snap) => {
+          setUserData(snap.exists() ? snap.data() : {});
+        },
+        (error) => {
+          handleFirestoreListenerError('out-tonight-user')(error);
+          setUserData(null);
+        }
+      );
     });
 
     return () => {
@@ -51,6 +61,20 @@ export function OutTonightProvider({ children }) {
     setModalMode('create');
     setModalVisible(true);
   };
+
+  // Keep ref in sync so the AsyncStorage check below can call it
+  openGoLiveRef.current = openGoLiveModal;
+
+  // Open Go Live modal automatically if flagged by onboarding "Go live now"
+  useEffect(() => {
+    AsyncStorage.getItem('openGoLiveAfterOnboarding').then((val) => {
+      if (val === 'true') {
+        AsyncStorage.removeItem('openGoLiveAfterOnboarding');
+        // Small delay to ensure the modal's parent is fully mounted
+        setTimeout(() => openGoLiveRef.current?.(), 400);
+      }
+    });
+  }, []);
 
   const openEditNoteModal = () => {
     setModalMode('edit');

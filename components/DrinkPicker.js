@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Modal,
   Pressable,
@@ -9,13 +10,21 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import BeerColors from '../constants/BeerColors';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '../contexts/ThemeContext';
+import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { DRINKS, OTHER_DRINK_TYPE_LIMIT } from '../constants/drinks';
+import { translateDrinkCategory, translateDrinkType } from '../utils/drinkI18n';
 
 const MIN_QTY = 1;
 const MAX_QTY = 20;
 
 export default function DrinkPicker({ visible, onClose, onAdd }) {
+  const { t } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const [step, setStep] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedType, setSelectedType] = useState(null);
@@ -46,6 +55,9 @@ export default function DrinkPicker({ visible, onClose, onAdd }) {
       return () => clearTimeout(timer);
     }
   }, [visible, step, isOther]);
+
+  const sheetBottomPadding =
+    keyboardHeight > 0 ? keyboardHeight + 12 : Math.max(insets.bottom, 20) + 12;
 
   const handleClose = () => {
     reset();
@@ -101,33 +113,35 @@ export default function DrinkPicker({ visible, onClose, onAdd }) {
   const incrementQty = () => setQuantity((q) => Math.min(MAX_QTY, q + 1));
 
   const renderStep1 = () => (
-    <>
-      <Text style={styles.sheetTitle}>Pick a category</Text>
-      <View style={styles.categoryGrid}>
-        {DRINKS.map((item) => (
-          <Pressable
-            key={item.category}
-            style={styles.categoryCard}
-            onPress={() => handleSelectCategory(item)}
-          >
-            <Text style={styles.categoryEmoji}>{item.emoji}</Text>
-            <Text style={styles.categoryName}>{item.category}</Text>
-          </Pressable>
-        ))}
-      </View>
-    </>
+    <View style={styles.categoryGrid}>
+      {DRINKS.map((item) => (
+        <Pressable
+          key={item.category}
+          style={styles.categoryCard}
+          onPress={() => handleSelectCategory(item)}
+        >
+          <Text style={styles.categoryEmoji}>{item.emoji}</Text>
+          <Text style={styles.categoryName}>{translateDrinkCategory(t, item.category)}</Text>
+        </Pressable>
+      ))}
+    </View>
   );
 
   const renderStep2 = () => {
     if (isOther) {
       return (
-        <>
-          <Text style={styles.sheetTitle}>What did you drink?</Text>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          contentContainerStyle={styles.otherScrollContent}
+        >
+          <Text style={styles.sheetTitle}>{t('whatDidYouDrink')}</Text>
           <TextInput
             ref={otherInputRef}
             style={styles.otherInput}
-            placeholder="What did you drink?"
-            placeholderTextColor={BeerColors.textMuted}
+            placeholder={t('whatDidYouDrink')}
+            placeholderTextColor={colors.textMuted}
             value={otherType}
             onChangeText={setOtherType}
             maxLength={OTHER_DRINK_TYPE_LIMIT}
@@ -143,15 +157,17 @@ export default function DrinkPicker({ visible, onClose, onAdd }) {
             onPress={handleOtherNext}
             disabled={!otherType.trim()}
           >
-            <Text style={styles.primaryButtonText}>Next</Text>
+            <Text style={styles.primaryButtonText}>{t('onboardingNext')}</Text>
           </Pressable>
-        </>
+        </ScrollView>
       );
     }
 
     return (
       <>
-        <Text style={styles.sheetTitle}>{selectedCategory?.emoji} {selectedCategory?.category}</Text>
+        <Text style={styles.sheetTitle}>
+          {selectedCategory?.emoji} {translateDrinkCategory(t, selectedCategory?.category)}
+        </Text>
         <ScrollView style={styles.typeList} showsVerticalScrollIndicator={false}>
           {selectedCategory?.types?.map((type) => (
             <Pressable
@@ -159,8 +175,8 @@ export default function DrinkPicker({ visible, onClose, onAdd }) {
               style={styles.typeRow}
               onPress={() => handleSelectType(type)}
             >
-              <Text style={styles.typeText}>{type}</Text>
-              <Ionicons name="chevron-forward" size={18} color={BeerColors.textMuted} />
+              <Text style={styles.typeText}>{translateDrinkType(t, type)}</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </Pressable>
           ))}
         </ScrollView>
@@ -170,14 +186,16 @@ export default function DrinkPicker({ visible, onClose, onAdd }) {
 
   const renderStep3 = () => (
     <>
-      <Text style={styles.sheetTitle}>How many {resolvedType}?</Text>
+      <Text style={styles.sheetTitle}>
+        {t('howManyDrinks', { drink: translateDrinkType(t, resolvedType) })}
+      </Text>
       <View style={styles.stepperRow}>
         <Pressable
           style={[styles.stepperButton, quantity <= MIN_QTY && styles.stepperButtonDisabled]}
           onPress={decrementQty}
           disabled={quantity <= MIN_QTY}
         >
-          <Ionicons name="remove" size={24} color={BeerColors.textPrimary} />
+          <Ionicons name="remove" size={24} color={colors.textPrimary} />
         </Pressable>
         <Text style={styles.stepperValue}>{quantity}</Text>
         <Pressable
@@ -185,11 +203,11 @@ export default function DrinkPicker({ visible, onClose, onAdd }) {
           onPress={incrementQty}
           disabled={quantity >= MAX_QTY}
         >
-          <Ionicons name="add" size={24} color={BeerColors.textPrimary} />
+          <Ionicons name="add" size={24} color={colors.textPrimary} />
         </Pressable>
       </View>
       <Pressable style={styles.primaryButton} onPress={handleAdd}>
-        <Text style={styles.primaryButtonText}>Add</Text>
+        <Text style={styles.primaryButtonText}>{t('addSegment')}</Text>
       </Pressable>
     </>
   );
@@ -197,19 +215,22 @@ export default function DrinkPicker({ visible, onClose, onAdd }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <Pressable style={styles.overlay} onPress={handleClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.sheetHandle} />
+        <Pressable
+          style={[styles.sheet, { paddingBottom: sheetBottomPadding }]}
+          onPress={(e) => e.stopPropagation()}
+        >
+          <View style={[styles.sheetHandle, step === 1 && styles.sheetHandleCompact]} />
 
-          <View style={styles.sheetHeader}>
+          <View style={[styles.sheetHeader, step === 1 && styles.sheetHeaderCompact]}>
             {step > 1 ? (
               <Pressable style={styles.backButton} onPress={handleBack}>
-                <Ionicons name="arrow-back" size={22} color={BeerColors.textPrimary} />
+                <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
               </Pressable>
             ) : (
               <View style={styles.backPlaceholder} />
             )}
             <Pressable style={styles.closeButton} onPress={handleClose}>
-              <Ionicons name="close" size={22} color={BeerColors.textMuted} />
+              <Ionicons name="close" size={22} color={colors.textMuted} />
             </Pressable>
           </View>
 
@@ -222,152 +243,161 @@ export default function DrinkPicker({ visible, onClose, onAdd }) {
   );
 }
 
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: BeerColors.overlayHeavy,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: BeerColors.panel,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 36,
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
-    maxHeight: '80%',
-  },
-  sheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: BeerColors.borderStrong,
-    alignSelf: 'center',
-    marginBottom: 12,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  backButton: {
-    padding: 4,
-  },
-  backPlaceholder: {
-    width: 30,
-  },
-  closeButton: {
-    padding: 4,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: BeerColors.textPrimary,
-    marginBottom: 16,
-  },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  categoryCard: {
-    width: '30%',
-    flexGrow: 1,
-    minWidth: 96,
-    backgroundColor: BeerColors.panelElevated,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
-  },
-  categoryEmoji: {
-    fontSize: 28,
-    marginBottom: 6,
-  },
-  categoryName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: BeerColors.textPrimary,
-    textAlign: 'center',
-  },
-  typeList: {
-    maxHeight: 320,
-  },
-  typeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: BeerColors.borderSoft,
-  },
-  typeText: {
-    fontSize: 16,
-    color: BeerColors.textPrimary,
-    fontWeight: '500',
-  },
-  otherInput: {
-    backgroundColor: BeerColors.panelElevated,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 16,
-    color: BeerColors.textPrimary,
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
-    marginBottom: 4,
-  },
-  charCounter: {
-    fontSize: 12,
-    color: BeerColors.textMuted,
-    textAlign: 'right',
-    marginBottom: 16,
-  },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 24,
-    marginBottom: 24,
-    marginTop: 8,
-  },
-  stepperButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: BeerColors.panelElevated,
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepperButtonDisabled: {
-    opacity: 0.4,
-  },
-  stepperValue: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: BeerColors.textPrimary,
-    minWidth: 48,
-    textAlign: 'center',
-  },
-  primaryButton: {
-    backgroundColor: BeerColors.accent,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  primaryButtonDisabled: {
-    opacity: 0.5,
-  },
-  primaryButtonText: {
-    color: BeerColors.onAccent,
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    overlay: {
+      flex: 1,
+      backgroundColor: colors.overlayHeavy,
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: colors.panel,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      borderWidth: 1,
+      borderColor: colors.borderSoft,
+      maxHeight: '85%',
+    },
+    otherScrollContent: {
+      paddingBottom: 8,
+    },
+    sheetHandle: {
+      width: 40,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.borderStrong,
+      alignSelf: 'center',
+      marginBottom: 12,
+    },
+    sheetHandleCompact: {
+      marginBottom: 8,
+    },
+    sheetHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    sheetHeaderCompact: {
+      marginBottom: 4,
+    },
+    backButton: {
+      padding: 4,
+    },
+    backPlaceholder: {
+      width: 30,
+    },
+    closeButton: {
+      padding: 4,
+    },
+    sheetTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+      marginBottom: 16,
+    },
+    categoryGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+    },
+    categoryCard: {
+      width: '30%',
+      flexGrow: 1,
+      minWidth: 96,
+      backgroundColor: colors.panelElevated,
+      borderRadius: 14,
+      paddingVertical: 16,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.borderSoft,
+    },
+    categoryEmoji: {
+      fontSize: 28,
+      marginBottom: 6,
+    },
+    categoryName: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      textAlign: 'center',
+    },
+    typeList: {
+      maxHeight: 320,
+    },
+    typeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 14,
+      paddingHorizontal: 4,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.borderSoft,
+    },
+    typeText: {
+      fontSize: 16,
+      color: colors.textPrimary,
+      fontWeight: '500',
+    },
+    otherInput: {
+      backgroundColor: colors.panelElevated,
+      borderRadius: 12,
+      padding: 14,
+      fontSize: 16,
+      color: colors.textPrimary,
+      borderWidth: 1,
+      borderColor: colors.borderSoft,
+      marginBottom: 4,
+    },
+    charCounter: {
+      fontSize: 12,
+      color: colors.textMuted,
+      textAlign: 'right',
+      marginBottom: 16,
+    },
+    stepperRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 24,
+      marginBottom: 24,
+      marginTop: 8,
+    },
+    stepperButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.panelElevated,
+      borderWidth: 1,
+      borderColor: colors.borderSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    stepperButtonDisabled: {
+      opacity: 0.4,
+    },
+    stepperValue: {
+      fontSize: 32,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+      minWidth: 48,
+      textAlign: 'center',
+    },
+    primaryButton: {
+      backgroundColor: colors.accent,
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+    },
+    primaryButtonDisabled: {
+      opacity: 0.5,
+    },
+    primaryButtonText: {
+      color: colors.onAccent,
+      fontSize: 16,
+      fontWeight: 'bold',
+    },
+  });

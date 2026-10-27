@@ -1,6 +1,14 @@
 import { Image } from 'expo-image';
+import { doc, getDoc } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import BeerColors from '../constants/BeerColors';
+import { db } from '../firebase/firebaseConfig';
+import { isPersistablePhotoUrl, resolveFirstProfilePhotoUrl } from '../utils/photoUtils';
+
+function isRenderablePhotoUrl(url) {
+  return typeof url === 'string' && isPersistablePhotoUrl(url);
+}
 
 export default function PressableUserAvatar({
   uid,
@@ -9,18 +17,55 @@ export default function PressableUserAvatar({
   onPress,
   style,
 }) {
+  const [resolvedPhotoURL, setResolvedPhotoURL] = useState(null);
+  const snapshotPhoto = snapshot?.photoURL;
   const name = snapshot?.name || 'U';
   const initial = name.charAt(0).toUpperCase();
   const radius = size / 2;
 
-  const avatar = snapshot?.photoURL ? (
+  useEffect(() => {
+    if (isRenderablePhotoUrl(snapshotPhoto)) {
+      setResolvedPhotoURL(snapshotPhoto);
+      return undefined;
+    }
+
+    if (!uid) {
+      setResolvedPhotoURL(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadPhoto = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'users', uid));
+        if (!snap.exists() || cancelled) return;
+        const photoUrl = await resolveFirstProfilePhotoUrl(uid, snap.data().photos);
+        if (!cancelled) setResolvedPhotoURL(photoUrl);
+      } catch {
+        if (!cancelled) setResolvedPhotoURL(null);
+      }
+    };
+
+    loadPhoto();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, snapshotPhoto]);
+
+  const photoURL = isRenderablePhotoUrl(snapshotPhoto) ? snapshotPhoto : resolvedPhotoURL;
+
+  const avatar = photoURL ? (
     <Image
-      source={{ uri: snapshot.photoURL }}
+      source={{ uri: photoURL }}
       style={{ width: size, height: size, borderRadius: radius }}
       contentFit="cover"
+      pointerEvents="none"
     />
   ) : (
-    <View style={[styles.placeholder, { width: size, height: size, borderRadius: radius }]}>
+    <View
+      pointerEvents="none"
+      style={[styles.placeholder, { width: size, height: size, borderRadius: radius }]}
+    >
       <Text style={[styles.initial, { fontSize: size * 0.4 }]}>{initial}</Text>
     </View>
   );
@@ -30,7 +75,11 @@ export default function PressableUserAvatar({
   }
 
   return (
-    <Pressable onPress={() => onPress(uid)} hitSlop={6} style={style}>
+    <Pressable
+      onPress={() => onPress(uid)}
+      hitSlop={8}
+      style={[style, { width: size, height: size }]}
+    >
       {avatar}
     </Pressable>
   );

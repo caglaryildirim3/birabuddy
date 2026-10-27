@@ -5,7 +5,7 @@ export const ROOM_VISIBILITY = {
   PRIVATE: 'private',
 };
 
-export const ROOM_EXPIRY_MS = 24 * 60 * 60 * 1000;
+export const ROOM_EXPIRY_MS = 5 * 60 * 60 * 1000;
 
 export function isRoomPublic(room) {
   return room?.visibility !== ROOM_VISIBILITY.PRIVATE;
@@ -37,4 +37,31 @@ export function isRoomExpired(dateVal, timeStr, now = new Date()) {
   const expiryDateTime = getRoomExpiryDateTime(dateVal, timeStr);
   if (!expiryDateTime) return false;
   return now > expiryDateTime;
+}
+
+export function canSeeRoomExactLocation(room, viewerUid, { isParticipant = false } = {}) {
+  if (!room || !viewerUid) return false;
+  return isParticipant || room.createdBy === viewerUid;
+}
+
+export function getRoomDisplayLocation(
+  room,
+  { isParticipant = false, viewerUid, t } = {}
+) {
+  if (!room) return t?.('notSpecified') ?? 'not specified';
+
+  const neighborhood = room.neighborhood || room.location;
+  const city = room.city;
+  const canSeeExact = canSeeRoomExactLocation(room, viewerUid, { isParticipant });
+
+  if (canSeeExact) {
+    if (room.barName && neighborhood) return `${room.barName}, ${neighborhood}`;
+    if (room.fullLocation) return room.fullLocation;
+    if (neighborhood && city) return `${neighborhood}, ${city}`;
+    return neighborhood || t?.('locationDetailsShared') || 'location details shared';
+  }
+
+  if (neighborhood && city) return `${neighborhood}, ${city}`;
+  if (neighborhood) return neighborhood;
+  return t?.('locationSharedAfterJoining') || 'location shared after joining';
 }

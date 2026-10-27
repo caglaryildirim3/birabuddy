@@ -1,15 +1,23 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import FriendChat from '../../components/FriendChat';
-import BeerColors from '../../constants/BeerColors';
+import { useTheme } from '../../contexts/ThemeContext';
 import { db } from '../../firebase/firebaseConfig';
+import { getUserDisplayName } from '../../utils/authUtils';
+import { resolveFirstProfilePhotoUrl } from '../../utils/photoUtils';
 
 export default function FriendChatScreen() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
-  const { uid } = useLocalSearchParams();
+  const { uid, messageId, scrollToNudge, at, messagePreview } = useLocalSearchParams();
   const friendUid = Array.isArray(uid) ? uid[0] : uid;
+  const initialScrollToMessageId = Array.isArray(messageId) ? messageId[0] : messageId;
+  const shouldScrollToNudge = (Array.isArray(scrollToNudge) ? scrollToNudge[0] : scrollToNudge) === '1';
+  const nudgeAtSeconds = Number(Array.isArray(at) ? at[0] : at) || null;
+  const previewMessage = Array.isArray(messagePreview) ? messagePreview[0] : messagePreview;
   const [friend, setFriend] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -28,10 +36,12 @@ export default function FriendChatScreen() {
 
         if (snap.exists()) {
           const data = snap.data();
+          const photoUrl = await resolveFirstProfilePhotoUrl(friendUid, data.photos);
           setFriend({
             uid: friendUid,
             name: data.name || data.nickname || data.instagram || 'User',
-            photoUrl: Array.isArray(data.photos) && data.photos[0] ? data.photos[0] : null,
+            instagram: data.instagram || data.nickname || null,
+            photoUrl,
           });
         }
       } finally {
@@ -49,7 +59,7 @@ export default function FriendChatScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={BeerColors.accent} />
+        <ActivityIndicator size="large" color={colors.accent} />
       </View>
     );
   }
@@ -67,20 +77,25 @@ export default function FriendChatScreen() {
       friendUid={friend.uid}
       friendName={friend.name}
       friendPhotoUrl={friend.photoUrl}
+      initialScrollToMessageId={initialScrollToMessageId || null}
+      scrollToNudge={shouldScrollToNudge}
+      nudgeAtSeconds={nudgeAtSeconds}
+      messagePreview={previewMessage || null}
       onClose={() => router.back()}
     />
   );
 }
 
-const styles = StyleSheet.create({
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: BeerColors.background,
-  },
-  errorText: {
-    color: BeerColors.textMuted,
-    fontSize: 16,
-  },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    centered: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+    },
+    errorText: {
+      color: colors.textMuted,
+      fontSize: 16,
+    },
+  });

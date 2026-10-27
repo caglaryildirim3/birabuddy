@@ -1,23 +1,41 @@
-import { IconMap2, IconMapPin, IconWorld } from '@tabler/icons-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { IconMap2, IconWorld } from '@tabler/icons-react-native';
 import { useRouter } from 'expo-router';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
+  ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Modal,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker } from 'react-native-maps';
 import { Image } from 'expo-image';
-import BeerColors from '../constants/BeerColors';
+import { NEIGHBORHOOD_COORDINATES } from '../constants/locations';
+import { useTheme } from '../contexts/ThemeContext';
 import { auth, db } from '../firebase/firebaseConfig';
+import { formatDateTimeShort, parseRoomDateTime } from '../utils/dateUtils';
 import { getFriendIds } from '../utils/friendUtils';
-import { isOutTonight, toMillis } from '../utils/outTonightUtils';
+import { getFriendNudgeErrorMessage, sendFriendNudge } from '../utils/friendNudgeUtils';
+import { isDeletedUser } from '../utils/deletedUserUtils';
+import { isOutTonight } from '../utils/outTonightUtils';
+import { applyRoomFilters, DEFAULT_ROOM_FILTERS, getNext7Days } from '../utils/roomListFilters';
+import { handleFirestoreListenerError } from '../utils/firestoreListenerUtils';
+import { canViewRoom, getRoomDisplayLocation, isRoomExpired } from '../utils/roomUtils';
+import {
+  getMapRegionForCoordinate,
+  resolveFriendMapCoordinate,
+} from '../utils/liveMapUtils';
+import { mergeLivePresenceIntoUser } from '../utils/livePresenceUtils';
+import { resolveFirstProfilePhotoUrl } from '../utils/photoUtils';
+import RoomFilterModal from '../components/RoomFilterModal';
 import UserProfile from '../components/UserProfile';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -28,9 +46,9 @@ const ISTANBUL_REGION = {
   longitudeDelta: 0.15,
 };
 
-const BOTTOM_SHEET_PEEK = 180;
+const FOCUS_REGION_DELTA = 0.04;
 
-function AvatarCircle({ photoURL, name, size = 44, ring = false, isYou = false }) {
+function AvatarCircle({ photoURL, name, size = 44, ring = false, isYou = false, accent, onAccent }) {
   const initial = name ? name.charAt(0).toUpperCase() : '?';
   return (
     <View
@@ -59,11 +77,11 @@ function AvatarCircle({ photoURL, name, size = 44, ring = false, isYou = false }
               width: size,
               height: size,
               borderRadius: size / 2,
-              backgroundColor: isYou ? '#4CAF50' : BeerColors.accent,
+              backgroundColor: isYou ? '#4CAF50' : accent,
             },
           ]}
         >
-          <Text style={[avatarStyles.initial, { fontSize: size * 0.38 }]}>{initial}</Text>
+          <Text style={[avatarStyles.initial, { fontSize: size * 0.38, color: onAccent }]}>{initial}</Text>
         </View>
       )}
     </View>
@@ -73,18 +91,87 @@ function AvatarCircle({ photoURL, name, size = 44, ring = false, isYou = false }
 const avatarStyles = StyleSheet.create({
   wrapper: { overflow: 'hidden' },
   fallback: { justifyContent: 'center', alignItems: 'center' },
-  initial: { fontWeight: 'bold', color: BeerColors.onAccent },
+  initial: { fontWeight: 'bold' },
 });
 
 export default function LiveMap() {
+  const { t, i18n } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const mapRef = useRef(null);
 
   const currentUid = auth.currentUser?.uid;
   const [friendIds, setFriendIds] = useState([]);
   const [friendsData, setFriendsData] = useState([]);
+  const [livePresenceByUid, setLivePresenceByUid] = useState({});
   const [currentUserData, setCurrentUserData] = useState(null);
   const [selectedUid, setSelectedUid] = useState(null);
+  const [mapRooms, setMapRooms] = useState([]);
+  const [selectedCluster, setSelectedCluster] = useState(null);
+  const [participantCounts, setParticipantCounts] = useState({});
+  const [userParticipations, setUserParticipations] = useState({});
+  const [roomParticipantUids, setRoomParticipantUids] = useState({});
+  const [isClusterFilterVisible, setIsClusterFilterVisible] = useState(false);
+  const [activeName, setActiveName] = useState(DEFAULT_ROOM_FILTERS.name);
+  const [activeDay, setActiveDay] = useState(DEFAULT_ROOM_FILTERS.day);
+  const [activeTimeStart, setActiveTimeStart] = useState(DEFAULT_ROOM_FILTERS.timeStart);
+  const [activeOnlyOpenSpots, setActiveOnlyOpenSpots] = useState(DEFAULT_ROOM_FILTERS.onlyOpenSpots);
+  const [activeWithFriendsOnly, setActiveWithFriendsOnly] = useState(false);
+  const [activeSortBy, setActiveSortBy] = useState(DEFAULT_ROOM_FILTERS.sortBy);
+  const [tempName, setTempName] = useState(DEFAULT_ROOM_FILTERS.name);
+  const [tempDay, setTempDay] = useState(DEFAULT_ROOM_FILTERS.day);
+  const [tempTimeStart, setTempTimeStart] = useState(DEFAULT_ROOM_FILTERS.timeStart);
+  const [tempOnlyOpenSpots, setTempOnlyOpenSpots] = useState(DEFAULT_ROOM_FILTERS.onlyOpenSpots);
+  const [tempWithFriendsOnly, setTempWithFriendsOnly] = useState(false);
+  const [tempSortBy, setTempSortBy] = useState(DEFAULT_ROOM_FILTERS.sortBy);
+  const [friendPhotoUrls, setFriendPhotoUrls] = useState({});
+  const [nudgeLoadingId, setNudgeLoadingId] = useState(null);
+
+  const next7Days = useMemo(() => getNext7Days(i18n.language), [i18n.language]);
+
+  const timeSlots = useMemo(
+    () => [
+      { label: t('before18'), start: -1 },
+      { label: t('time1819'), start: 18 },
+      { label: t('time1920'), start: 19 },
+      { label: t('time2021'), start: 20 },
+      { label: t('time2122'), start: 21 },
+      { label: t('time2223'), start: 22 },
+      { label: t('time2300'), start: 23 },
+      { label: t('time00plus'), start: 24 },
+    ],
+    [t]
+  );
+
+  const openClusterFilterModal = () => {
+    setTempName(activeName);
+    setTempDay(activeDay);
+    setTempTimeStart(activeTimeStart);
+    setTempOnlyOpenSpots(activeOnlyOpenSpots);
+    setTempWithFriendsOnly(activeWithFriendsOnly);
+    setTempSortBy(activeSortBy);
+    setIsClusterFilterVisible(true);
+  };
+
+  const applyClusterFilters = () => {
+    setActiveName(tempName);
+    setActiveDay(tempDay);
+    setActiveTimeStart(tempTimeStart);
+    setActiveOnlyOpenSpots(tempOnlyOpenSpots);
+    setActiveWithFriendsOnly(tempWithFriendsOnly);
+    setActiveSortBy(tempSortBy);
+    setIsClusterFilterVisible(false);
+  };
+
+  const clearClusterFilters = () => {
+    setTempName(DEFAULT_ROOM_FILTERS.name);
+    setTempDay(DEFAULT_ROOM_FILTERS.day);
+    setTempTimeStart(DEFAULT_ROOM_FILTERS.timeStart);
+    setTempOnlyOpenSpots(DEFAULT_ROOM_FILTERS.onlyOpenSpots);
+    setTempWithFriendsOnly(false);
+    setTempSortBy(DEFAULT_ROOM_FILTERS.sortBy);
+  };
 
   // Load friend IDs once
   useEffect(() => {
@@ -137,75 +224,436 @@ export default function LiveMap() {
     return () => unsubscribers.forEach((u) => u());
   }, [currentUid, friendIds.join(',')]);
 
-  const liveFriends = useMemo(
-    () =>
-      friendsData.filter((f) => {
-        if (!isOutTonight(f)) return false;
-        return true;
-      }),
-    [friendsData]
+  useEffect(() => {
+    if (!currentUid) return undefined;
+    const uidsToWatch = [...friendIds, currentUid];
+    if (uidsToWatch.length === 0) return undefined;
+
+    const unsubscribers = [];
+    const chunks = [];
+    for (let i = 0; i < uidsToWatch.length; i += 10) {
+      chunks.push(uidsToWatch.slice(i, i + 10));
+    }
+
+    chunks.forEach((chunk) => {
+      const unsub = onSnapshot(
+        query(collection(db, 'livePresence'), where('__name__', 'in', chunk)),
+        (snap) => {
+          setLivePresenceByUid((prev) => {
+            const next = { ...prev };
+            chunk.forEach((uid) => {
+              if (!snap.docs.find((d) => d.id === uid)) {
+                delete next[uid];
+              }
+            });
+            snap.docs.forEach((presenceDoc) => {
+              next[presenceDoc.id] = presenceDoc.data();
+            });
+            return next;
+          });
+        },
+        handleFirestoreListenerError('live-map-presence')
+      );
+      unsubscribers.push(unsub);
+    });
+
+    return () => unsubscribers.forEach((u) => u());
+  }, [currentUid, friendIds.join(',')]);
+
+  const mergedCurrentUser = useMemo(
+    () => mergeLivePresenceIntoUser(currentUserData, livePresenceByUid[currentUid]),
+    [currentUserData, livePresenceByUid, currentUid]
   );
 
-  const mappableFriends = useMemo(
+  const mergedFriendsData = useMemo(
     () =>
-      liveFriends.filter(
-        (f) =>
-          f.liveLocationShared === true &&
-          f.liveLocation?.latitude != null &&
-          f.liveLocation?.longitude != null
+      friendsData.map((friend) =>
+        mergeLivePresenceIntoUser(friend, livePresenceByUid[friend.uid])
       ),
+    [friendsData, livePresenceByUid]
+  );
+
+  useEffect(() => {
+    if (!currentUid || !auth.currentUser?.emailVerified) {
+      setMapRooms([]);
+      return undefined;
+    }
+
+    const roomSources = { public: [], joined: [], friends: [] };
+    const unsubs = [];
+
+    const mapRoomDocs = (snapshot) =>
+      snapshot.docs.map((roomDoc) => ({ id: roomDoc.id, ...roomDoc.data() }));
+
+    const syncVisibleRooms = () => {
+      const now = new Date();
+      const merged = new Map();
+      [...roomSources.public, ...roomSources.joined, ...roomSources.friends].forEach((room) => {
+        merged.set(room.id, room);
+      });
+
+      const visibleRooms = [];
+      for (const room of merged.values()) {
+        const { date, time } = room;
+        if (!date) continue;
+        if (!parseRoomDateTime(date, time)) continue;
+        if (isRoomExpired(date, time, now)) continue;
+        if (room.creatorAccountDeleted) continue;
+        if (!canViewRoom(room, currentUid, friendIds)) continue;
+
+        const neighborhood = (room.neighborhood || room.location || '').toLowerCase();
+        if (!neighborhood || !NEIGHBORHOOD_COORDINATES[neighborhood]) continue;
+
+        visibleRooms.push({ ...room, neighborhood });
+      }
+
+      setMapRooms(visibleRooms);
+    };
+
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'rooms'), where('visibility', '==', 'public')),
+        (snapshot) => {
+          roomSources.public = mapRoomDocs(snapshot);
+          syncVisibleRooms();
+        },
+        handleFirestoreListenerError('live-map-public-rooms')
+      )
+    );
+
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'rooms'), where('participants', 'array-contains', currentUid)),
+        (snapshot) => {
+          roomSources.joined = mapRoomDocs(snapshot);
+          syncVisibleRooms();
+        },
+        handleFirestoreListenerError('live-map-joined-rooms')
+      )
+    );
+
+    if (friendIds.length > 0) {
+      for (let i = 0; i < friendIds.length; i += 10) {
+        const chunk = friendIds.slice(i, i + 10);
+        const chunkIds = new Set(chunk);
+        unsubs.push(
+          onSnapshot(
+            query(collection(db, 'rooms'), where('createdBy', 'in', chunk)),
+            (snapshot) => {
+              const friendRooms = mapRoomDocs(snapshot).filter((room) => chunkIds.has(room.createdBy));
+              roomSources.friends = [
+                ...roomSources.friends.filter((room) => !chunkIds.has(room.createdBy)),
+                ...friendRooms,
+              ];
+              syncVisibleRooms();
+            },
+            handleFirestoreListenerError('live-map-friend-rooms')
+          )
+        );
+      }
+    } else {
+      roomSources.friends = [];
+      syncVisibleRooms();
+    }
+
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [currentUid, friendIds.join(',')]);
+
+  useEffect(() => {
+    const unsubs = mapRooms.map((room) =>
+      onSnapshot(
+        collection(db, 'rooms', room.id, 'participants'),
+        (snapshot) => {
+          const participants = snapshot.docs.map((docSnap) => docSnap.data());
+          const isUserParticipant = participants.some((p) => p.uid === currentUid);
+
+          setParticipantCounts((prev) => ({
+            ...prev,
+            [room.id]: snapshot.docs.length,
+          }));
+          setUserParticipations((prev) => ({
+            ...prev,
+            [room.id]: isUserParticipant,
+          }));
+          setRoomParticipantUids((prev) => ({
+            ...prev,
+            [room.id]: participants.map((p) => p.uid).filter(Boolean),
+          }));
+        },
+        handleFirestoreListenerError('live-map-participants')
+      )
+    );
+
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [mapRooms.map((room) => room.id).join(','), currentUid]);
+
+  const filteredClusterRooms = useMemo(() => {
+    if (!selectedCluster) return [];
+
+    const friendIdSet = new Set(friendIds);
+
+    return applyRoomFilters(selectedCluster.rooms, {
+      name: activeName,
+      cities: [],
+      locations: [],
+      day: activeDay,
+      timeStart: activeTimeStart,
+      onlyOpenSpots: activeOnlyOpenSpots,
+      sortBy: activeSortBy,
+    }, {
+      participantCounts,
+      currentUserUid: currentUid,
+    }).filter((room) => {
+      if (!activeWithFriendsOnly) return true;
+      const participantUids = roomParticipantUids[room.id] || [];
+      return participantUids.some((uid) => friendIdSet.has(uid));
+    });
+  }, [
+    selectedCluster,
+    activeName,
+    activeDay,
+    activeTimeStart,
+    activeOnlyOpenSpots,
+    activeWithFriendsOnly,
+    activeSortBy,
+    participantCounts,
+    roomParticipantUids,
+    friendIds,
+    currentUid,
+  ]);
+
+  const roomClusters = useMemo(() => {
+    const clusters = new Map();
+
+    for (const room of mapRooms) {
+      const key = room.neighborhood;
+      if (!clusters.has(key)) {
+        clusters.set(key, {
+          neighborhood: key,
+          city: room.city,
+          coordinate: NEIGHBORHOOD_COORDINATES[key],
+          rooms: [],
+        });
+      }
+      clusters.get(key).rooms.push(room);
+    }
+
+    return Array.from(clusters.values()).sort((a, b) => b.rooms.length - a.rooms.length);
+  }, [mapRooms]);
+
+  const liveFriends = useMemo(
+    () =>
+      mergedFriendsData.filter((f) => !isDeletedUser(f) && isOutTonight(f)),
+    [mergedFriendsData]
+  );
+
+  const friendsOnMap = useMemo(
+    () =>
+      liveFriends
+        .map((friend) => ({
+          ...friend,
+          mapCoordinate: resolveFriendMapCoordinate(friend),
+        }))
+        .filter((friend) => friend.mapCoordinate != null),
     [liveFriends]
   );
 
-  const iAmLive =
-    currentUserData &&
-    isOutTonight(currentUserData) &&
-    currentUserData.liveLocationShared === true &&
-    currentUserData.liveLocation?.latitude != null;
+  const selfMapCoordinate = useMemo(
+    () => (mergedCurrentUser ? resolveFriendMapCoordinate(mergedCurrentUser) : null),
+    [mergedCurrentUser]
+  );
 
-  const hasMapMarkers = mappableFriends.length > 0 || iAmLive;
+  const iAmLive = mergedCurrentUser && isOutTonight(mergedCurrentUser) && selfMapCoordinate != null;
 
-  const initialRegion = useMemo(() => {
-    if (currentUserData?.liveLocation?.latitude != null) {
-      return {
-        latitude: currentUserData.liveLocation.latitude,
-        longitude: currentUserData.liveLocation.longitude,
-        latitudeDelta: 0.08,
-        longitudeDelta: 0.08,
-      };
-    }
-    if (mappableFriends.length > 0) {
-      return {
-        latitude: mappableFriends[0].liveLocation.latitude,
-        longitude: mappableFriends[0].liveLocation.longitude,
-        latitudeDelta: 0.12,
-        longitudeDelta: 0.12,
-      };
-    }
-    return ISTANBUL_REGION;
+  const hasMapMarkers = friendsOnMap.length > 0 || iAmLive || roomClusters.length > 0;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPhotos = async () => {
+      const photoTargets = [...liveFriends];
+      if (currentUid && mergedCurrentUser) {
+        photoTargets.push({ uid: currentUid, photos: mergedCurrentUser.photos });
+      }
+
+      const entries = await Promise.all(
+        photoTargets.map(async (friend) => {
+          const photoUrl = await resolveFirstProfilePhotoUrl(friend.uid, friend.photos);
+          return [friend.uid, photoUrl];
+        })
+      );
+
+      if (cancelled) return;
+      setFriendPhotoUrls((prev) => {
+        const next = { ...prev };
+        entries.forEach(([uid, photoUrl]) => {
+          if (photoUrl) next[uid] = photoUrl;
+        });
+        return next;
+      });
+    };
+
+    loadPhotos().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [liveFriends, currentUid, mergedCurrentUser]);
+
+  const focusMapOnCoordinate = useCallback((coordinate) => {
+    const region = getMapRegionForCoordinate(coordinate, FOCUS_REGION_DELTA);
+    if (!region || !mapRef.current) return;
+    mapRef.current.animateToRegion(region, 500);
   }, []);
 
+  const openFriendProfile = useCallback((uid) => {
+    setSelectedCluster(null);
+    setSelectedUid(uid);
+  }, []);
+
+  const openChatWithFriend = useCallback(
+    (friend) => {
+      router.push(`/friend-chat/${friend.uid}`);
+    },
+    [router]
+  );
+
+  const handleNudgeFriend = async (friend) => {
+    if (!currentUid || nudgeLoadingId) return;
+    setNudgeLoadingId(friend.uid);
+    try {
+      await sendFriendNudge(friend.uid);
+    } catch (error) {
+      Alert.alert(t('error'), getFriendNudgeErrorMessage(error, t));
+    } finally {
+      setNudgeLoadingId(null);
+    }
+  };
+
+  // MapView only reads initialRegion on mount, before our location has loaded,
+  // so re-center once it arrives. Self wins over a friend; after that, leave the user's panning alone.
+  const [mapReady, setMapReady] = useState(false);
+  const centeredOnRef = useRef(null);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || centeredOnRef.current === 'self') return;
+
+    if (selfMapCoordinate) {
+      mapRef.current.animateToRegion(getMapRegionForCoordinate(selfMapCoordinate, 0.08), 500);
+      centeredOnRef.current = 'self';
+      return;
+    }
+
+    if (!centeredOnRef.current && friendsOnMap.length > 0) {
+      mapRef.current.animateToRegion(
+        getMapRegionForCoordinate(friendsOnMap[0].mapCoordinate, 0.12),
+        500
+      );
+      centeredOnRef.current = 'friend';
+    }
+  }, [mapReady, selfMapCoordinate, friendsOnMap]);
+
+  const initialRegion = useMemo(() => {
+    if (selfMapCoordinate) {
+      return getMapRegionForCoordinate(selfMapCoordinate, 0.08) || ISTANBUL_REGION;
+    }
+    if (friendsOnMap.length > 0) {
+      return getMapRegionForCoordinate(friendsOnMap[0].mapCoordinate, 0.12) || ISTANBUL_REGION;
+    }
+    return ISTANBUL_REGION;
+  }, [selfMapCoordinate, friendsOnMap]);
+
+  const openCluster = (cluster) => {
+    setSelectedUid(null);
+    setSelectedCluster(cluster);
+  };
+
+  const renderRoomRow = ({ item }) => {
+    const isParticipant = userParticipations[item.id] || false;
+    const currentCount = participantCounts[item.id] || 0;
+    const locationLine = getRoomDisplayLocation(item, {
+      isParticipant,
+      viewerUid: currentUid,
+      t,
+    });
+
+    return (
+      <Pressable
+        style={styles.listRow}
+        onPress={() => {
+          setSelectedCluster(null);
+          router.push(`/room-details/${item.id}`);
+        }}
+      >
+        <Text style={styles.roomEmoji}>🍺</Text>
+        <View style={styles.listRowText}>
+          <Text style={styles.listRowName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <Text style={styles.listRowNote} numberOfLines={1}>
+            {locationLine}
+          </Text>
+          <Text style={styles.listRowMeta} numberOfLines={1}>
+            {formatDateTimeShort(item.date, item.time, { unknownLabel: t('unknown') })}
+          </Text>
+        </View>
+        <Text style={styles.listRowCount}>
+          {currentCount}/{item.maxParticipants || '?'}
+        </Text>
+      </Pressable>
+    );
+  };
+
   const renderFriendRow = ({ item }) => {
-    const hasLocation = item.liveLocationShared && item.liveLocation?.latitude != null;
-    const photoURL =
-      Array.isArray(item.photos) && item.photos[0] ? item.photos[0] : null;
+    const mapCoordinate = resolveFriendMapCoordinate(item);
+    const photoURL = friendPhotoUrls[item.uid] || null;
     const name = item.name || item.nickname || item.instagram || 'Friend';
 
     return (
-      <Pressable style={styles.listRow} onPress={() => setSelectedUid(item.uid)}>
-        <AvatarCircle photoURL={photoURL} name={name} size={40} ring />
-        <View style={styles.listRowText}>
-          <Text style={styles.listRowName}>{name}</Text>
-          {item.outTonightNote ? (
-            <Text style={styles.listRowNote} numberOfLines={1}>
-              {item.outTonightNote}
-            </Text>
-          ) : null}
+      <View style={styles.listRow}>
+        <Pressable
+          style={styles.listRowMain}
+          onPress={() => {
+            if (mapCoordinate) {
+              focusMapOnCoordinate(mapCoordinate);
+              return;
+            }
+            openFriendProfile(item.uid);
+          }}
+        >
+          <AvatarCircle photoURL={photoURL} name={name} size={40} ring accent={colors.accent} onAccent={colors.onAccent} />
+          <View style={styles.listRowText}>
+            <Text style={styles.listRowName}>{name}</Text>
+            {item.outTonightNote?.trim() ? (
+              <Text style={styles.listRowNote} numberOfLines={2}>
+                {item.outTonightNote.trim()}
+              </Text>
+            ) : null}
+          </View>
+        </Pressable>
+        <View style={styles.friendActions}>
+          <Pressable
+            style={styles.actionIconButton}
+            onPress={() => handleNudgeFriend(item)}
+            disabled={nudgeLoadingId === item.uid}
+            hitSlop={8}
+            accessibilityLabel={t('nudgeFriend')}
+          >
+            {nudgeLoadingId === item.uid ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Text style={styles.nudgeEmoji}>👉</Text>
+            )}
+          </Pressable>
+          <Pressable
+            style={styles.actionIconButton}
+            onPress={() => openChatWithFriend(item)}
+            hitSlop={8}
+            accessibilityLabel={t('chat')}
+          >
+            <Ionicons name="chatbubble-outline" size={20} color={colors.accent} />
+          </Pressable>
         </View>
-        {hasLocation ? (
-          <IconMapPin size={14} color={BeerColors.accent} />
-        ) : null}
-      </Pressable>
+      </View>
     );
   };
 
@@ -217,14 +665,14 @@ export default function LiveMap() {
           <Text style={styles.backText}>‹ Back</Text>
         </Pressable>
         <View style={styles.headerCenter}>
-          <IconWorld size={20} color={BeerColors.textPrimary} />
-          <Text style={styles.headerTitle}>Live now</Text>
+          <IconWorld size={20} color={colors.textPrimary} />
+          <Text style={styles.headerTitle}>{t('liveMapTitle')}</Text>
         </View>
         <View style={styles.headerRight}>
           {liveFriends.length > 0 ? (
             <View style={styles.countBadge}>
               <Text style={styles.countBadgeText}>
-                {liveFriends.length} live
+                {t('liveCount', { count: liveFriends.length })}
               </Text>
             </View>
           ) : null}
@@ -237,66 +685,88 @@ export default function LiveMap() {
           ref={mapRef}
           style={StyleSheet.absoluteFill}
           initialRegion={initialRegion}
+          onMapReady={() => setMapReady(true)}
           showsUserLocation={false}
         >
           {/* Friend markers */}
-          {mappableFriends.map((friend) => {
-            const photoURL =
-              Array.isArray(friend.photos) && friend.photos[0] ? friend.photos[0] : null;
+          {friendsOnMap.map((friend) => {
+            const photoURL = friendPhotoUrls[friend.uid] || null;
             const name = friend.name || friend.nickname || friend.instagram || 'Friend';
             return (
               <Marker
                 key={friend.uid}
                 coordinate={{
-                  latitude: friend.liveLocation.latitude,
-                  longitude: friend.liveLocation.longitude,
+                  latitude: friend.mapCoordinate.latitude,
+                  longitude: friend.mapCoordinate.longitude,
                 }}
-                onPress={() => setSelectedUid(friend.uid)}
+                anchor={{ x: 0.5, y: 0.5 }}
+                tracksViewChanges={false}
+                onPress={() => openFriendProfile(friend.uid)}
               >
-                <View style={styles.markerWrapper}>
-                  <AvatarCircle photoURL={photoURL} name={name} size={44} ring />
-                  <Text style={styles.markerLabel} numberOfLines={1}>
-                    {name.split(' ')[0]}
-                  </Text>
-                </View>
+                <Pressable
+                  style={styles.markerWrapper}
+                  onPress={() => openFriendProfile(friend.uid)}
+                  hitSlop={8}
+                >
+                  <AvatarCircle photoURL={photoURL} name={name} size={44} ring accent={colors.accent} onAccent={colors.onAccent} />
+                </Pressable>
               </Marker>
             );
           })}
 
           {/* Self marker */}
-          {iAmLive ? (
+          {iAmLive && selfMapCoordinate ? (
             <Marker
               key="self"
               coordinate={{
-                latitude: currentUserData.liveLocation.latitude,
-                longitude: currentUserData.liveLocation.longitude,
+                latitude: selfMapCoordinate.latitude,
+                longitude: selfMapCoordinate.longitude,
               }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              tracksViewChanges={false}
+              onPress={() => openFriendProfile(currentUid)}
             >
-              <View style={styles.markerWrapper}>
+              <Pressable
+                style={styles.markerWrapper}
+                onPress={() => openFriendProfile(currentUid)}
+                hitSlop={8}
+              >
                 <AvatarCircle
-                  photoURL={
-                    Array.isArray(currentUserData.photos) && currentUserData.photos[0]
-                      ? currentUserData.photos[0]
-                      : null
-                  }
+                  photoURL={friendPhotoUrls[currentUid] || null}
                   name="You"
                   size={52}
                   ring
                   isYou
+                  accent={colors.accent}
+                  onAccent={colors.onAccent}
                 />
-                <Text style={[styles.markerLabel, styles.markerLabelYou]}>You</Text>
-              </View>
+              </Pressable>
             </Marker>
           ) : null}
+
+          {roomClusters.map((cluster) => (
+            <Marker
+              key={`room-cluster-${cluster.neighborhood}`}
+              coordinate={cluster.coordinate}
+              onPress={() => openCluster(cluster)}
+            >
+              <View style={styles.beerMarker}>
+                <Text style={styles.beerEmoji}>🍺</Text>
+                <View style={styles.beerCountBadge}>
+                  <Text style={styles.beerCountText}>×{cluster.rooms.length}</Text>
+                </View>
+              </View>
+            </Marker>
+          ))}
         </MapView>
 
         {/* Empty overlay */}
         {!hasMapMarkers ? (
-          <View style={styles.emptyOverlay}>
-            <View style={styles.emptyCard}>
-              <IconMap2 size={32} color={BeerColors.textMuted} style={{ marginBottom: 8 }} />
+          <View style={styles.emptyOverlay} pointerEvents="box-none">
+            <View style={styles.emptyCard} pointerEvents="none">
+              <IconMap2 size={32} color={colors.textMuted} style={{ marginBottom: 8 }} />
               <Text style={styles.emptyText}>
-                None of your friends are live with location sharing right now
+                {t('nothingOnLiveMap')}
               </Text>
             </View>
           </View>
@@ -306,28 +776,86 @@ export default function LiveMap() {
       {/* Bottom sheet */}
       <View style={styles.bottomSheet}>
         <View style={styles.bottomSheetHandle} />
-        <Text style={styles.bottomSheetTitle}>
-          {liveFriends.length === 0 ? 'No friends out tonight' : `${liveFriends.length} out tonight`}
-        </Text>
-        {liveFriends.length === 0 ? (
-          <Text style={styles.emptyListText}>
-            When friends go live you'll see them here.
-          </Text>
+        {selectedCluster ? (
+          <>
+            <View style={styles.clusterHeaderRow}>
+              <Pressable style={styles.clusterBackRow} onPress={() => setSelectedCluster(null)}>
+                <Text style={styles.clusterBackText}>‹ {t('back')}</Text>
+              </Pressable>
+              <Pressable style={styles.clusterFilterBtn} onPress={openClusterFilterModal}>
+                <Ionicons name="filter" size={20} color={colors.iconPrimary} />
+              </Pressable>
+            </View>
+            <Text style={styles.bottomSheetTitle}>
+              {t('roomsInNeighborhood', {
+                neighborhood: selectedCluster.neighborhood,
+                count: filteredClusterRooms.length,
+              })}
+            </Text>
+            {filteredClusterRooms.length === 0 ? (
+              <Text style={styles.emptyListText}>{t('noRoomsFound')}</Text>
+            ) : (
+              <FlatList
+                data={filteredClusterRooms}
+                keyExtractor={(item) => item.id}
+                renderItem={renderRoomRow}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.listContent}
+              />
+            )}
+          </>
         ) : (
-          <FlatList
-            data={liveFriends}
-            keyExtractor={(item) => item.uid}
-            renderItem={renderFriendRow}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.listContent}
-          />
+          <>
+            <Text style={styles.bottomSheetTitle}>
+              {liveFriends.length === 0
+                ? t('noFriendsLive')
+                : t('liveCount', { count: liveFriends.length })}
+            </Text>
+            {liveFriends.length === 0 ? (
+              <Text style={styles.emptyListText}>
+                {roomClusters.length > 0 ? t('tapBeerForRooms') : t('friendsGoLiveHint')}
+              </Text>
+            ) : (
+              <FlatList
+                data={liveFriends}
+                keyExtractor={(item) => item.uid}
+                renderItem={renderFriendRow}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.listContent}
+              />
+            )}
+          </>
         )}
       </View>
+
+      <RoomFilterModal
+        visible={isClusterFilterVisible}
+        onClose={() => setIsClusterFilterVisible(false)}
+        showLocationFilters={false}
+        tempName={tempName}
+        setTempName={setTempName}
+        tempDay={tempDay}
+        setTempDay={setTempDay}
+        tempTimeStart={tempTimeStart}
+        setTempTimeStart={setTempTimeStart}
+        tempOnlyOpenSpots={tempOnlyOpenSpots}
+        setTempOnlyOpenSpots={setTempOnlyOpenSpots}
+        showWithFriendsFilter
+        tempWithFriendsOnly={tempWithFriendsOnly}
+        setTempWithFriendsOnly={setTempWithFriendsOnly}
+        tempSortBy={tempSortBy}
+        setTempSortBy={setTempSortBy}
+        next7Days={next7Days}
+        timeSlots={timeSlots}
+        onApply={applyClusterFilters}
+        onClear={clearClusterFilters}
+      />
 
       {/* Profile modal */}
       <Modal
         visible={!!selectedUid}
         animationType="slide"
+        presentationStyle="pageSheet"
         onRequestClose={() => setSelectedUid(null)}
       >
         {selectedUid ? (
@@ -340,10 +868,10 @@ export default function LiveMap() {
 
 const BOTTOM_SHEET_HEIGHT = SCREEN_HEIGHT * 0.38;
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BeerColors.background,
+    backgroundColor: colors.background,
   },
 
   // Header
@@ -354,15 +882,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: BeerColors.borderSoft,
-    backgroundColor: BeerColors.background,
+    borderBottomColor: colors.borderSoft,
+    backgroundColor: colors.background,
   },
   backButton: {
     width: 64,
   },
   backText: {
     fontSize: 17,
-    color: BeerColors.accent,
+    color: colors.accent,
     fontWeight: '600',
   },
   headerCenter: {
@@ -373,20 +901,20 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 17,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
   },
   headerRight: {
     width: 64,
     alignItems: 'flex-end',
   },
   countBadge: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   countBadgeText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -397,25 +925,27 @@ const styles = StyleSheet.create({
   },
   markerWrapper: {
     alignItems: 'center',
-    gap: 4,
   },
-  markerLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: BeerColors.textPrimary,
-    backgroundColor: BeerColors.white,
-    paddingHorizontal: 6,
+  beerMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  beerEmoji: {
+    fontSize: 34,
+    lineHeight: 38,
+  },
+  beerCountBadge: {
+    marginTop: -4,
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 8,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
+    borderWidth: 2,
+    borderColor: colors.white,
   },
-  markerLabelYou: {
-    color: '#2E7D32',
+  beerCountText: {
+    color: colors.onAccent,
+    fontSize: 12,
     fontWeight: 'bold',
   },
 
@@ -428,17 +958,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emptyCard: {
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     borderRadius: 20,
     padding: 24,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
     maxWidth: 280,
   },
   emptyText: {
     fontSize: 15,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
   },
@@ -446,11 +976,11 @@ const styles = StyleSheet.create({
   // Bottom sheet
   bottomSheet: {
     height: BOTTOM_SHEET_HEIGHT,
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     borderTopWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
     paddingTop: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -3 },
@@ -462,14 +992,14 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: BeerColors.borderSoft,
+    backgroundColor: colors.borderSoft,
     alignSelf: 'center',
     marginBottom: 12,
   },
   bottomSheetTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     paddingHorizontal: 20,
     marginBottom: 8,
     textTransform: 'uppercase',
@@ -482,10 +1012,15 @@ const styles = StyleSheet.create({
   listRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: BeerColors.borderSoft,
+    borderBottomColor: colors.borderSoft,
+  },
+  listRowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   listRowText: {
     flex: 1,
@@ -493,16 +1028,67 @@ const styles = StyleSheet.create({
   listRowName: {
     fontSize: 15,
     fontWeight: '600',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
   },
   listRowNote: {
     fontSize: 13,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
+  },
+  listRowMeta: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  listRowCount: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: colors.textPrimary,
+    minWidth: 44,
+    textAlign: 'right',
+  },
+  friendActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionIconButton: {
+    padding: 8,
+    marginLeft: 4,
+  },
+  nudgeEmoji: {
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  roomEmoji: {
+    fontSize: 24,
+    width: 32,
+    textAlign: 'center',
+  },
+  clusterHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 20,
+    marginBottom: 4,
+  },
+  clusterBackRow: {
+    paddingHorizontal: 20,
+  },
+  clusterFilterBtn: {
+    padding: 8,
+    backgroundColor: colors.panelSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  clusterBackText: {
+    fontSize: 16,
+    color: colors.accent,
+    fontWeight: '600',
   },
   emptyListText: {
     fontSize: 14,
-    color: BeerColors.textMuted,
+    color: colors.textMuted,
     paddingHorizontal: 20,
     lineHeight: 20,
   },

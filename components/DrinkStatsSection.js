@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { DRINKS } from '../constants/drinks';
-import BeerColors from '../constants/BeerColors';
+import { useTheme } from '../contexts/ThemeContext';
 import { CATEGORY_COLORS } from '../utils/drinkStatsUtils';
 
 const EMOJI_BY_CATEGORY = Object.fromEntries(DRINKS.map((d) => [d.category, d.emoji]));
 
-function MetricCard({ label, value }) {
+function MetricCard({ label, value, styles }) {
   return (
     <View style={styles.metricCard}>
       <Text style={styles.metricValue}>{value}</Text>
@@ -15,7 +16,7 @@ function MetricCard({ label, value }) {
   );
 }
 
-function InfoCard({ title, children }) {
+function InfoCard({ title, children, styles }) {
   return (
     <View style={styles.infoCard}>
       <Text style={styles.infoCardTitle}>{title}</Text>
@@ -25,6 +26,9 @@ function InfoCard({ title, children }) {
 }
 
 export default function DrinkStatsSection({ stats }) {
+  const { t } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [period, setPeriod] = useState('all');
 
   const display = useMemo(() => {
@@ -52,8 +56,8 @@ export default function DrinkStatsSection({ stats }) {
   if (!stats || stats.totalDrinks === 0) {
     return (
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Drink Stats 🍺</Text>
-        <Text style={styles.emptyText}>Log drinks on your posts to see your stats</Text>
+        <Text style={styles.sectionTitle}>{t('drinkStatsTitle')}</Text>
+        <Text style={styles.emptyText}>{t('drinkStatsEmpty')}</Text>
       </View>
     );
   }
@@ -90,13 +94,13 @@ export default function DrinkStatsSection({ stats }) {
       </View>
 
       <View style={styles.metricsRow}>
-        <MetricCard label="Nights out" value={display.totalNightsOut} />
-        <MetricCard label="Drinks total" value={display.totalDrinks} />
-        <MetricCard label="Avg per night" value={avgDisplay} />
+        <MetricCard label="Nights out" value={display.totalNightsOut} styles={styles} />
+        <MetricCard label="Drinks total" value={display.totalDrinks} styles={styles} />
+        <MetricCard label="Avg per night" value={avgDisplay} styles={styles} />
       </View>
 
       <View style={styles.topRow}>
-        <InfoCard title="Go-to drink">
+        <InfoCard title="Go-to drink" styles={styles}>
           {display.topDrink ? (
             <Text style={styles.infoCardValue}>
               {display.topDrink.emoji} {display.topDrink.type}
@@ -105,7 +109,7 @@ export default function DrinkStatsSection({ stats }) {
             <Text style={styles.dash}>—</Text>
           )}
         </InfoCard>
-        <InfoCard title="Go-to category">
+        <InfoCard title={t('goToCategory')} styles={styles}>
           {display.topCategory ? (
             <Text style={styles.infoCardValue}>
               {display.topCategory.emoji} {display.topCategory.category}
@@ -121,7 +125,7 @@ export default function DrinkStatsSection({ stats }) {
           <View style={styles.breakdownBar}>
             {categories.map(([category, total], index) => {
               const widthPct = (total / display.totalDrinks) * 100;
-              const color = CATEGORY_COLORS[category] || BeerColors.accent;
+              const color = CATEGORY_COLORS[category] || colors.accent;
               const isFirst = index === 0;
               const isLast = index === categories.length - 1;
               return (
@@ -155,135 +159,136 @@ export default function DrinkStatsSection({ stats }) {
   );
 }
 
-const styles = StyleSheet.create({
-  sectionCard: {
-    backgroundColor: BeerColors.panel,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: BeerColors.textPrimary,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-    gap: 8,
-  },
-  toggle: {
-    flexDirection: 'row',
-    backgroundColor: BeerColors.panelElevated,
-    borderRadius: 10,
-    padding: 3,
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
-  },
-  toggleBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-  },
-  toggleBtnActive: {
-    backgroundColor: BeerColors.accent,
-  },
-  toggleText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: BeerColors.textSecondary,
-  },
-  toggleTextActive: {
-    color: BeerColors.onAccent,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: BeerColors.textSecondary,
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  metricsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  metricCard: {
-    flex: 1,
-    backgroundColor: BeerColors.panelElevated,
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
-  },
-  metricValue: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: BeerColors.textPrimary,
-    marginBottom: 4,
-  },
-  metricLabel: {
-    fontSize: 11,
-    color: BeerColors.textSecondary,
-    textAlign: 'center',
-  },
-  topRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  infoCard: {
-    flex: 1,
-    backgroundColor: BeerColors.panelElevated,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
-    minHeight: 72,
-  },
-  infoCardTitle: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: BeerColors.textSecondary,
-    marginBottom: 6,
-  },
-  infoCardValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: BeerColors.textPrimary,
-    lineHeight: 18,
-  },
-  dash: {
-    fontSize: 18,
-    color: BeerColors.textMuted,
-    fontWeight: '600',
-  },
-  breakdownSection: {
-    marginTop: 4,
-  },
-  breakdownBar: {
-    flexDirection: 'row',
-    height: 14,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: BeerColors.panelSoft,
-  },
-  breakdownSegment: {
-    height: '100%',
-  },
-  legendRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 10,
-  },
-  legendItem: {
-    fontSize: 12,
-    color: BeerColors.textSecondary,
-    fontWeight: '500',
-  },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    sectionCard: {
+      backgroundColor: colors.panel,
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.borderSoft,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 14,
+      gap: 8,
+    },
+    toggle: {
+      flexDirection: 'row',
+      backgroundColor: colors.panelElevated,
+      borderRadius: 10,
+      padding: 3,
+      borderWidth: 1,
+      borderColor: colors.borderSoft,
+    },
+    toggleBtn: {
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 8,
+    },
+    toggleBtnActive: {
+      backgroundColor: colors.accent,
+    },
+    toggleText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+    },
+    toggleTextActive: {
+      color: colors.onAccent,
+    },
+    emptyText: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      fontStyle: 'italic',
+      marginTop: 4,
+    },
+    metricsRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 12,
+    },
+    metricCard: {
+      flex: 1,
+      backgroundColor: colors.panelElevated,
+      borderRadius: 12,
+      padding: 12,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.borderSoft,
+    },
+    metricValue: {
+      fontSize: 22,
+      fontWeight: 'bold',
+      color: colors.textPrimary,
+      marginBottom: 4,
+    },
+    metricLabel: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      textAlign: 'center',
+    },
+    topRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 12,
+    },
+    infoCard: {
+      flex: 1,
+      backgroundColor: colors.panelElevated,
+      borderRadius: 12,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: colors.borderSoft,
+      minHeight: 72,
+    },
+    infoCardTitle: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      marginBottom: 6,
+    },
+    infoCardValue: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      lineHeight: 18,
+    },
+    dash: {
+      fontSize: 18,
+      color: colors.textMuted,
+      fontWeight: '600',
+    },
+    breakdownSection: {
+      marginTop: 4,
+    },
+    breakdownBar: {
+      flexDirection: 'row',
+      height: 14,
+      borderRadius: 8,
+      overflow: 'hidden',
+      backgroundColor: colors.panelSoft,
+    },
+    breakdownSegment: {
+      height: '100%',
+    },
+    legendRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+      marginTop: 10,
+    },
+    legendItem: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      fontWeight: '500',
+    },
+  });

@@ -1,41 +1,51 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   arrayUnion,
   collection,
-  deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
   query,
   serverTimestamp,
   updateDoc,
-  where,
+  where
 } from 'firebase/firestore';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Alert,
   FlatList,
-  Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  View
+  View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import LiveMapFab from '../components/LiveMapFab';
+import RoomFilterModal from '../components/RoomFilterModal';
+import { NEIGHBORHOODS_BY_CITY as CITY_NEIGHBORHOODS } from '../constants/locations';
+import { useTheme } from '../contexts/ThemeContext';
 import { auth, db } from '../firebase/firebaseConfig';
-import { useTranslation } from 'react-i18next';
-import BeerColors from '../constants/BeerColors';
-import { NEIGHBORHOODS_BY_CITY as CITY_NEIGHBORHOODS, CITIES, ALL_NEIGHBORHOODS } from '../constants/locations';
-import { getFriendIds } from '../utils/friendUtils';
+import { getUserDisplayName } from '../utils/authUtils';
 import { formatDateTimeShort, parseRoomDateTime } from '../utils/dateUtils';
+import { getFriendIds } from '../utils/friendUtils';
+import { deleteRoomTree } from '../utils/roomDeleteUtils';
+import {
+  countUnreadRoomInvites,
+  isUnreadRoomInvite,
+  loadSeenRoomInvites,
+} from '../utils/roomInviteUtils';
+import { applyRoomFilters, DEFAULT_ROOM_FILTERS, getNext7Days } from '../utils/roomListFilters';
+import { handleFirestoreListenerError } from '../utils/firestoreListenerUtils';
 import { canViewRoom, isRoomExpired } from '../utils/roomUtils';
-import { isOutTonight } from '../utils/outTonightUtils';
 
 export default function JoinRoom() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [rooms, setRooms] = useState([]);
   const [participantCounts, setParticipantCounts] = useState({});
   const [userParticipations, setUserParticipations] = useState({});
@@ -43,8 +53,11 @@ export default function JoinRoom() {
   const [friendIds, setFriendIds] = useState([]);
   const [roomParticipantUids, setRoomParticipantUids] = useState({});
   const [withFriendsOnly, setWithFriendsOnly] = useState(false);
-  const [anyFriendLive, setAnyFriendLive] = useState(false);
+  const [invitesOnly, setInvitesOnly] = useState(false);
+  const [inviteSenderByRoomId, setInviteSenderByRoomId] = useState({});
+  const [inviterNamesByUid, setInviterNamesByUid] = useState({});
   const [loading, setLoading] = useState(true);
+  const [seenInviteMap, setSeenInviteMap] = useState({});
   const router = useRouter();
 
   const [isFilterVisible, setIsFilterVisible] = useState(false);
@@ -55,25 +68,18 @@ export default function JoinRoom() {
   const [activeLocations, setActiveLocations] = useState([]); 
   const [activeDay, setActiveDay] = useState(null);
   const [activeTimeStart, setActiveTimeStart] = useState(null);
+  const [activeOnlyOpenSpots, setActiveOnlyOpenSpots] = useState(DEFAULT_ROOM_FILTERS.onlyOpenSpots);
+  const [activeSortBy, setActiveSortBy] = useState(DEFAULT_ROOM_FILTERS.sortBy);
 
   const [tempName, setTempName] = useState('');
   const [tempCities, setTempCities] = useState([]);
   const [tempLocations, setTempLocations] = useState([]);
   const [tempDay, setTempDay] = useState(null);
   const [tempTimeStart, setTempTimeStart] = useState(null);
+  const [tempOnlyOpenSpots, setTempOnlyOpenSpots] = useState(DEFAULT_ROOM_FILTERS.onlyOpenSpots);
+  const [tempSortBy, setTempSortBy] = useState(DEFAULT_ROOM_FILTERS.sortBy);
 
-  const next7Days = useMemo(() => {
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() + i);
-      days.push({
-        label: d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' }),
-        value: d.toISOString().split('T')[0]
-      });
-    }
-    return days;
-  }, []);
+  const next7Days = useMemo(() => getNext7Days(i18n.language), [i18n.language]);
 
   const timeSlots = [
     { label: t('before18'), start: -1 },
@@ -92,6 +98,8 @@ export default function JoinRoom() {
     setTempLocations([...activeLocations]);
     setTempDay(activeDay);
     setTempTimeStart(activeTimeStart);
+    setTempOnlyOpenSpots(activeOnlyOpenSpots);
+    setTempSortBy(activeSortBy);
     setIsFilterVisible(true);
   };
 
@@ -101,15 +109,19 @@ export default function JoinRoom() {
     setActiveLocations(tempLocations);
     setActiveDay(tempDay);
     setActiveTimeStart(tempTimeStart);
+    setActiveOnlyOpenSpots(tempOnlyOpenSpots);
+    setActiveSortBy(tempSortBy);
     setIsFilterVisible(false);
   };
 
   const clearFilters = () => {
-    setTempName('');
-    setTempCities([]);
-    setTempLocations([]);
-    setTempDay(null);
-    setTempTimeStart(null);
+    setTempName(DEFAULT_ROOM_FILTERS.name);
+    setTempCities([...DEFAULT_ROOM_FILTERS.cities]);
+    setTempLocations([...DEFAULT_ROOM_FILTERS.locations]);
+    setTempDay(DEFAULT_ROOM_FILTERS.day);
+    setTempTimeStart(DEFAULT_ROOM_FILTERS.timeStart);
+    setTempOnlyOpenSpots(DEFAULT_ROOM_FILTERS.onlyOpenSpots);
+    setTempSortBy(DEFAULT_ROOM_FILTERS.sortBy);
   };
 
   const toggleCity = (city) => {
@@ -117,18 +129,18 @@ export default function JoinRoom() {
       ? tempCities.filter((c) => c !== city)
       : [...tempCities, city];
 
-    const allowedNeighborhoods = selectedCities.length > 0
-      ? selectedCities.flatMap((selectedCity) => CITY_NEIGHBORHOODS[selectedCity] || [])
-      : ALL_NEIGHBORHOODS;
+    const allowedNeighborhoods = selectedCities.flatMap(
+      (selectedCity) => CITY_NEIGHBORHOODS[selectedCity] || []
+    );
 
     setTempLocations((prev) => prev.filter((loc) => allowedNeighborhoods.includes(loc)));
 
     setTempCities(selectedCities);
   };
 
-  const visibleNeighborhoods = tempCities.length > 0
-    ? tempCities.flatMap((selectedCity) => CITY_NEIGHBORHOODS[selectedCity] || [])
-    : ALL_NEIGHBORHOODS;
+  const visibleNeighborhoods = tempCities.flatMap(
+    (selectedCity) => CITY_NEIGHBORHOODS[selectedCity] || []
+  );
 
   const toggleNeighborhood = (neighborhood) => {
     if (tempLocations.includes(neighborhood)) {
@@ -139,12 +151,18 @@ export default function JoinRoom() {
   };
 
   useEffect(() => {
-    let unsubscribe = null;
+    let roomUnsubs = [];
     let participantUnsubscribes = [];
+    const roomSources = {
+      public: [],
+      joined: [],
+      friends: [],
+    };
 
     const authUnsubscribe = onAuthStateChanged(auth, (user) => {
-      if (unsubscribe) unsubscribe();
-      participantUnsubscribes.forEach(unsub => unsub());
+      roomUnsubs.forEach((unsub) => unsub());
+      roomUnsubs = [];
+      participantUnsubscribes.forEach((unsub) => unsub());
       participantUnsubscribes = [];
 
       setCurrentUser(user);
@@ -159,51 +177,18 @@ export default function JoinRoom() {
 
       getFriendIds(user.uid).then(setFriendIds).catch(() => setFriendIds([]));
 
-      const roomsRef = collection(db, 'rooms');
+      const mapRoomDocs = (snapshot) =>
+        snapshot.docs.map((roomDoc) => ({ id: roomDoc.id, ...roomDoc.data() }));
 
-      unsubscribe = onSnapshot(roomsRef, async (snapshot) => {
-          const now = new Date();
-          const fetchedRooms = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data()
-          }));
+      const syncParticipantListeners = (filteredRooms) => {
+        participantUnsubscribes.forEach((unsub) => unsub());
+        participantUnsubscribes = [];
 
-          const filteredRooms = [];
-
-          for (const room of fetchedRooms) {
-            const { date, time, createdBy } = room;
-            
-            // 1. Safety Check: If no date, skip
-            if (!date) continue;
-
-            if (!parseRoomDateTime(date, time)) continue;
-
-            // 3. THE 24-HOUR RULE
-            if (isRoomExpired(date, time, now)) {
-              // If I am the creator, delete it from the database to clean up
-              if (createdBy === user.uid) {
-                try {
-                  await deleteDoc(doc(db, 'rooms', room.id));
-                  console.log(`Deleted expired room: ${room.name}`);
-                } catch (err) {
-                  console.error("Failed to auto-delete room:", err);
-                }
-              }
-              // STRICTLY SKIP: Don't show this room in the list, even if delete failed
-              continue;
-            }
-
-            // 5. Hide my own rooms; respect public/private visibility
-            if (createdBy !== user.uid && canViewRoom(room, user.uid, friendIds)) {
-              filteredRooms.push(room);
-            }
-          }
-
-          // ... (Rest of your existing logic for participants stays here) ...
-          
-          filteredRooms.forEach((room) => {
-            const participantsRef = collection(db, 'rooms', room.id, 'participants');
-            const participantUnsub = onSnapshot(participantsRef, (participantSnapshot) => {
+        filteredRooms.forEach((room) => {
+          const participantsRef = collection(db, 'rooms', room.id, 'participants');
+          const participantUnsub = onSnapshot(
+            participantsRef,
+            (participantSnapshot) => {
               const participants = participantSnapshot.docs.map((participantDoc) => participantDoc.data());
               const isUserParticipant = participants.some((p) => p.uid === user.uid);
               const participantUids = participants.map((p) => p.uid).filter(Boolean);
@@ -222,61 +207,222 @@ export default function JoinRoom() {
                 ...prev,
                 [room.id]: participantUids,
               }));
-            });
-            participantUnsubscribes.push(participantUnsub);
-          });
+            },
+            handleFirestoreListenerError('room-list-participants')
+          );
+          participantUnsubscribes.push(participantUnsub);
+        });
+      };
 
-          setRooms(filteredRooms);
-          setLoading(false);
-        },
-        (error) => {
-          console.error('Error fetching rooms:', error);
-          setLoading(false);
+      const processMergedRooms = async () => {
+        const merged = new Map();
+        [...roomSources.public, ...roomSources.joined, ...roomSources.friends].forEach((room) => {
+          merged.set(room.id, room);
+        });
+
+        const now = new Date();
+        const filteredRooms = [];
+
+        for (const room of merged.values()) {
+          const { date, time, createdBy } = room;
+
+          if (!date) continue;
+          if (!parseRoomDateTime(date, time)) continue;
+
+          if (isRoomExpired(date, time, now)) {
+            if (createdBy === user.uid) {
+              try {
+                await deleteRoomTree(room.id);
+              } catch (err) {
+                if (err?.code !== 'permission-denied') {
+                  console.warn('Failed to auto-delete room:', err);
+                }
+              }
+            }
+            continue;
+          }
+
+          if (room.creatorAccountDeleted) continue;
+
+          if (createdBy !== user.uid && canViewRoom(room, user.uid, friendIds)) {
+            filteredRooms.push(room);
+          }
         }
+
+        syncParticipantListeners(filteredRooms);
+        setRooms(filteredRooms);
+        setLoading(false);
+      };
+
+      const handleRoomListenerError = (label) => (error) => {
+        handleFirestoreListenerError(`room-list-${label}`)(error);
+        setLoading(false);
+      };
+
+      roomUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'rooms'), where('visibility', '==', 'public')),
+          (snapshot) => {
+            roomSources.public = mapRoomDocs(snapshot);
+            processMergedRooms();
+          },
+          handleRoomListenerError('public')
+        )
       );
+
+      roomUnsubs.push(
+        onSnapshot(
+          query(collection(db, 'rooms'), where('participants', 'array-contains', user.uid)),
+          (snapshot) => {
+            roomSources.joined = mapRoomDocs(snapshot);
+            processMergedRooms();
+          },
+          handleRoomListenerError('joined')
+        )
+      );
+
+      if (friendIds.length > 0) {
+        for (let i = 0; i < friendIds.length; i += 10) {
+          const chunk = friendIds.slice(i, i + 10);
+          roomUnsubs.push(
+            onSnapshot(
+              query(collection(db, 'rooms'), where('createdBy', 'in', chunk)),
+              (snapshot) => {
+                const chunkIds = new Set(chunk);
+                const friendRooms = mapRoomDocs(snapshot).filter((room) => chunkIds.has(room.createdBy));
+                roomSources.friends = [
+                  ...roomSources.friends.filter((room) => !chunkIds.has(room.createdBy)),
+                  ...friendRooms,
+                ];
+                processMergedRooms();
+              },
+              handleRoomListenerError('friends')
+            )
+          );
+        }
+      } else {
+        roomSources.friends = [];
+      }
     });
 
     return () => {
       authUnsubscribe();
-      if (unsubscribe) unsubscribe();
-      participantUnsubscribes.forEach(unsub => unsub());
+      roomUnsubs.forEach((unsub) => unsub());
+      participantUnsubscribes.forEach((unsub) => unsub());
     };
   }, [friendIds.join(',')]);
 
-  // Watch friends' live status for the green dot on the map button
   useEffect(() => {
-    if (friendIds.length === 0) {
-      setAnyFriendLive(false);
-      return;
+    if (!currentUser?.uid) {
+      setInviteSenderByRoomId({});
+      return undefined;
     }
-    const chunks = [];
-    for (let i = 0; i < friendIds.length; i += 10) {
-      chunks.push(friendIds.slice(i, i + 10));
-    }
-    // Track per-chunk live status, merge into single boolean
-    const chunkLive = new Array(chunks.length).fill(false);
-    const unsubscribers = chunks.map((chunk, idx) =>
-      onSnapshot(
-        query(collection(db, 'users'), where('__name__', 'in', chunk)),
-        (snap) => {
-          chunkLive[idx] = snap.docs.some((d) => isOutTonight(d.data()));
-          setAnyFriendLive(chunkLive.some(Boolean));
-        }
-      )
+
+    const unsub = onSnapshot(
+      query(collection(db, 'notifications'), where('userId', '==', currentUser.uid)),
+      (snapshot) => {
+        const next = {};
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.type === 'invite' && data.roomId && data.senderId) {
+            next[data.roomId] = data.senderId;
+          }
+        });
+        setInviteSenderByRoomId(next);
+      },
+      handleFirestoreListenerError('room-list-invites')
     );
-    return () => unsubscribers.forEach((u) => u());
-  }, [friendIds.join(',')]); 
+
+    return unsub;
+  }, [currentUser?.uid]);
+
+  const invitedRoomMetaById = useMemo(() => {
+    if (!currentUser?.uid) return {};
+
+    const map = {};
+    rooms.forEach((room) => {
+      if (!room.invites?.includes(currentUser.uid)) return;
+      const meta = room.inviteMeta?.[currentUser.uid];
+      const senderUid = meta?.senderId || inviteSenderByRoomId[room.id];
+      map[room.id] = {
+        inviterName:
+          (senderUid && inviterNamesByUid[senderUid]) ||
+          meta?.senderName ||
+          t('aFriend'),
+        inviterUid: senderUid,
+      };
+    });
+    return map;
+  }, [rooms, currentUser?.uid, inviteSenderByRoomId, inviterNamesByUid, t]);
+
+  const unreadInviteCount = useMemo(
+    () =>
+      countUnreadRoomInvites(rooms, currentUser?.uid, seenInviteMap, userParticipations),
+    [rooms, currentUser?.uid, seenInviteMap, userParticipations]
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!currentUser?.uid) {
+        setSeenInviteMap({});
+        return;
+      }
+      loadSeenRoomInvites(currentUser.uid).then(setSeenInviteMap).catch(() => setSeenInviteMap({}));
+    }, [currentUser?.uid])
+  );
+
+  useEffect(() => {
+    const uids = new Set();
+    Object.values(invitedRoomMetaById).forEach((meta) => {
+      if (meta.inviterUid) uids.add(meta.inviterUid);
+    });
+
+    if (uids.size === 0) return undefined;
+
+    let cancelled = false;
+
+    Promise.all(
+      [...uids].map(async (uid) => {
+        try {
+          const snap = await getDoc(doc(db, 'users', uid));
+          if (!snap.exists()) return { uid, name: null };
+          const data = snap.data();
+          return { uid, name: getUserDisplayName(data) || null };
+        } catch {
+          return { uid, name: null };
+        }
+      })
+    ).then((rows) => {
+      if (cancelled) return;
+      const next = { ...inviterNamesByUid };
+      rows.forEach((row) => {
+        if (row.name) next[row.uid] = row.name;
+      });
+      setInviterNamesByUid(next);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [invitedRoomMetaById]);
 
   const availableRooms = useMemo(() => {
     const friendIdSet = new Set(friendIds);
 
-    let filtered = rooms.filter((room) => {
-      const max = room.maxParticipants || 0;
-      const current = participantCounts[room.id] || 0;
-      const isUserInRoom = userParticipations[room.id] || false;
-
-      if (max > 0 && current >= max) return false;
-      if (isUserInRoom) return false;
+    const filtered = applyRoomFilters(rooms, {
+      name: activeName,
+      cities: activeCities,
+      locations: activeLocations,
+      day: activeDay,
+      timeStart: activeTimeStart,
+      onlyOpenSpots: activeOnlyOpenSpots,
+      sortBy: activeSortBy,
+    }, {
+      participantCounts,
+      userParticipations,
+      currentUserUid: currentUser?.uid,
+    }).filter((room) => {
+      if (invitesOnly && !room.invites?.includes(currentUser?.uid)) return false;
 
       if (withFriendsOnly) {
         const participantUids = roomParticipantUids[room.id] || [];
@@ -284,65 +430,10 @@ export default function JoinRoom() {
         if (!hasFriendInRoom) return false;
       }
 
-      if (activeName && !room.name.toLowerCase().includes(activeName.toLowerCase())) return false;
-
-      if (activeCities.length > 0) {
-        const roomCity = (room.city || '').toLowerCase();
-        const matchCity = activeCities.some((selectedCity) => roomCity === selectedCity.toLowerCase());
-        if (!matchCity) return false;
-      }
-
-      if (activeLocations.length > 0) {
-        const roomLoc = (room.neighborhood || room.location || '').toLowerCase();
-        const match = activeLocations.some(selectedLoc => 
-          roomLoc.includes(selectedLoc.toLowerCase())
-        );
-        if (!match) return false;
-      }
-
-      // --- CHANGE 3 START: Handle Date Filter for both Old (String) and New (Timestamp) data ---
-      if (activeDay) {
-        let roomDateStr;
-
-        if (room.date && room.date.toDate) {
-            // New Data: Convert Timestamp to 'YYYY-MM-DD' string to match the filter
-            const d = room.date.toDate();
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            roomDateStr = `${year}-${month}-${day}`;
-        } else {
-            // Old Data: It's already a string like "2025-11-26"
-            roomDateStr = room.date;
-        }
-
-        // Compare the converted string with the filter
-        if (roomDateStr !== activeDay) return false;
-      }
-      // --- CHANGE 3 END ---
-
-      if (activeTimeStart !== null) {
-        const roomHour = parseInt(room.time.split(':')[0], 10);
-        
-        if (activeTimeStart === -1) {
-          if (roomHour >= 18) return false;
-        } else if (activeTimeStart === 24) {
-          if (roomHour >= 6) return false; 
-        } else {
-          if (roomHour !== activeTimeStart) return false;
-        }
-      }
-
       return true;
     });
 
-    return filtered.sort((a, b) => {
-      // Safety check: sometimes new rooms might not have createdAt immediately
-      if (a.createdAt && b.createdAt) {
-        return b.createdAt.seconds - a.createdAt.seconds;
-      }
-      return 0;
-    });
+    return filtered;
   }, [
     rooms,
     participantCounts,
@@ -350,11 +441,15 @@ export default function JoinRoom() {
     roomParticipantUids,
     friendIds,
     withFriendsOnly,
+    invitesOnly,
     activeName,
     activeCities,
     activeLocations,
     activeDay,
     activeTimeStart,
+    activeOnlyOpenSpots,
+    activeSortBy,
+    currentUser?.uid,
   ]);
 
   const handleRequest = async (room) => {
@@ -364,7 +459,7 @@ export default function JoinRoom() {
       const roomRef = doc(db, 'rooms', room.id);
       await updateDoc(roomRef, {
         requests: arrayUnion(currentUser.uid),
-        requestTimestamps: { [currentUser.uid]: serverTimestamp() }
+        [`requestTimestamps.${currentUser.uid}`]: serverTimestamp(),
       });
       
     } catch (error) {
@@ -375,34 +470,42 @@ export default function JoinRoom() {
   const renderRoom = ({ item }) => {
     const requested = item.requests?.includes(currentUser?.uid);
     const currentCount = participantCounts[item.id] || 0;
-    
+    const inviteMeta = invitedRoomMetaById[item.id];
+    const hasUnreadInvite = isUnreadRoomInvite(item, currentUser?.uid, seenInviteMap);
+
     return (
       <Pressable
         style={styles.card}
         onPress={() => router.push(`/room-details/${item.id}`)}
       >
+        {hasUnreadInvite ? <View style={styles.cardInviteDot} /> : null}
         <View style={styles.cardLeft}>
           <Text style={styles.title} numberOfLines={1}>{item.name}</Text>
-          
+          {inviteMeta ? (
+            <Text style={styles.inviteByLine} numberOfLines={1}>
+              {t('roomInviteBy', { name: inviteMeta.inviterName })}
+            </Text>
+          ) : null}
+
           {item.description ? (
             <Text style={styles.description} numberOfLines={1}>{item.description}</Text>
           ) : null}
 
           <View style={styles.infoRow}>
-            <Ionicons name="location-outline" size={14} color={BeerColors.iconPrimary} />
+            <Ionicons name="location-outline" size={14} color={colors.iconPrimary} />
             <Text style={styles.location} numberOfLines={1}>
               {item.city ? `${item.neighborhood || item.location}, ${item.city}` : (item.neighborhood || item.location)}
             </Text>
           </View>
           <View style={styles.infoRow}>
-            <Ionicons name="time-outline" size={14} color={BeerColors.iconPrimary} />
+            <Ionicons name="time-outline" size={14} color={colors.iconPrimary} />
             <Text style={styles.time}>{formatDateTimeShort(item.date, item.time, { unknownLabel: t('unknown') })}</Text>
           </View>
         </View>
 
         <View style={styles.cardRight}>
           <View style={styles.countContainer}>
-            <Ionicons name="people" size={16} color={BeerColors.iconPrimary} />
+            <Ionicons name="people" size={16} color={colors.iconPrimary} />
             <Text style={styles.peopleCount}>{currentCount}/{item.maxParticipants || '?'}</Text>
           </View>
 
@@ -439,152 +542,106 @@ export default function JoinRoom() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable
-          style={[styles.withFriendsButton, withFriendsOnly && styles.withFriendsButtonActive]}
-          onPress={() => setWithFriendsOnly((prev) => !prev)}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.headerScroll}
+          contentContainerStyle={styles.headerButtons}
         >
-          <Ionicons
-            name="people"
-            size={16}
-            color={withFriendsOnly ? BeerColors.onAccent : BeerColors.iconPrimary}
-          />
-          <Text
-            style={[
-              styles.withFriendsButtonText,
-              withFriendsOnly && styles.withFriendsButtonTextActive,
-            ]}
+          <Pressable
+            style={[styles.filterChip, withFriendsOnly && styles.filterChipActive]}
+            onPress={() => setWithFriendsOnly((prev) => !prev)}
           >
-            {t('withFriends')}
-          </Text>
-        </Pressable>
+            <Ionicons
+              name="people"
+              size={15}
+              color={withFriendsOnly ? colors.onAccent : colors.iconPrimary}
+            />
+            <Text
+              style={[
+                styles.filterChipText,
+                withFriendsOnly && styles.filterChipTextActive,
+              ]}
+            >
+              {t('withFriends')}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.filterChip, invitesOnly && styles.filterChipActive]}
+            onPress={() => setInvitesOnly((prev) => !prev)}
+          >
+            <Ionicons
+              name="mail-outline"
+              size={15}
+              color={invitesOnly ? colors.onAccent : colors.iconPrimary}
+            />
+            <Text
+              style={[
+                styles.filterChipText,
+                invitesOnly && styles.filterChipTextActive,
+              ]}
+            >
+              {t('roomInvites')}
+            </Text>
+            {unreadInviteCount > 0 ? <View style={styles.invitesDot} /> : null}
+          </Pressable>
+        </ScrollView>
         <Pressable style={styles.filterIconBtn} onPress={openFilterModal}>
-          <Ionicons name="filter" size={24} color={BeerColors.iconPrimary} />
+          <Ionicons name="filter" size={24} color={colors.iconPrimary} />
         </Pressable>
       </View>
 
-      <Modal
-        animationType="slide"
-        transparent={true}
+      <RoomFilterModal
         visible={isFilterVisible}
-        onRequestClose={() => setIsFilterVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{t('filterRooms')}</Text>
-              <Pressable onPress={() => setIsFilterVisible(false)}>
-                <Ionicons name="close" size={24} color={BeerColors.textPrimary} />
-              </Pressable>
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.filterLabel}>{t('roomName')}</Text>
-              <TextInput 
-                style={styles.input} 
-                placeholder={t('searchByName')}
-                value={tempName}
-                onChangeText={setTempName}
-              />
-              <Text style={styles.filterLabel}>{t('cities')}</Text>
-              <View style={styles.wrapContainer}>
-                {CITIES.map((city) => {
-                  const isSelected = tempCities.includes(city);
-                  return (
-                    <Pressable
-                      key={city}
-                      style={[styles.chip, isSelected && styles.chipActive]}
-                      onPress={() => toggleCity(city)}
-                    >
-                      <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
-                        {city}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Text style={styles.filterLabel}>{t('neighborhoods')}</Text>
-              <View style={styles.wrapContainer}>
-                {visibleNeighborhoods.map((hood) => {
-                  const isSelected = tempLocations.includes(hood);
-                  return (
-                    <Pressable
-                      key={hood}
-                      style={[styles.chip, isSelected && styles.chipActive]}
-                      onPress={() => toggleNeighborhood(hood)}
-                    >
-                      <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
-                        {hood}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Text style={styles.filterLabel}>{t('day')}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                <Pressable 
-                  style={[styles.chip, tempDay === null && styles.chipActive]}
-                  onPress={() => setTempDay(null)}
-                >
-                  <Text style={[styles.chipText, tempDay === null && styles.chipTextActive]}>{t('any')}</Text>
-                </Pressable>
-                {next7Days.map((day) => (
-                  <Pressable
-                    key={day.value}
-                    style={[styles.chip, tempDay === day.value && styles.chipActive]}
-                    onPress={() => setTempDay(day.value === tempDay ? null : day.value)}
-                  >
-                    <Text style={[styles.chipText, tempDay === day.value && styles.chipTextActive]}>
-                      {day.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-              <Text style={styles.filterLabel}>{t('timeInterval')}</Text>
-              <View style={styles.wrapContainer}>
-                <Pressable 
-                  style={[styles.chip, tempTimeStart === null && styles.chipActive]}
-                  onPress={() => setTempTimeStart(null)}
-                >
-                  <Text style={[styles.chipText, tempTimeStart === null && styles.chipTextActive]}>{t('any')}</Text>
-                </Pressable>
-                {timeSlots.map((slot) => (
-                  <Pressable
-                    key={slot.start}
-                    style={[styles.chip, tempTimeStart === slot.start && styles.chipActive]}
-                    onPress={() => setTempTimeStart(slot.start === tempTimeStart ? null : slot.start)}
-                  >
-                    <Text style={[styles.chipText, tempTimeStart === slot.start && styles.chipTextActive]}>
-                      {slot.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
-            <View style={styles.modalFooter}>
-              <Pressable style={styles.clearButton} onPress={clearFilters}>
-                <Text style={styles.clearButtonText}>{t('clearAllFilters')}</Text>
-              </Pressable>
-              <Pressable style={styles.applyButton} onPress={applyFilters}>
-                <Text style={styles.applyButtonText}>{t('showResults')}</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setIsFilterVisible(false)}
+        showLocationFilters
+        tempName={tempName}
+        setTempName={setTempName}
+        tempCities={tempCities}
+        toggleCity={toggleCity}
+        tempLocations={tempLocations}
+        toggleNeighborhood={toggleNeighborhood}
+        visibleNeighborhoods={visibleNeighborhoods}
+        tempDay={tempDay}
+        setTempDay={setTempDay}
+        tempTimeStart={tempTimeStart}
+        setTempTimeStart={setTempTimeStart}
+        tempOnlyOpenSpots={tempOnlyOpenSpots}
+        setTempOnlyOpenSpots={setTempOnlyOpenSpots}
+        tempSortBy={tempSortBy}
+        setTempSortBy={setTempSortBy}
+        next7Days={next7Days}
+        timeSlots={timeSlots}
+        onApply={applyFilters}
+        onClear={clearFilters}
+      />
 
       {availableRooms.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>{t('noRoomsFound')}</Text>
-          <Pressable 
+          <Text style={styles.emptyText}>
+            {invitesOnly ? t('noRoomInvites') : t('noRoomsFound')}
+          </Text>
+          <Pressable
+            style={styles.createRoomButton}
+            onPress={() => router.push('/create-room')}
+          >
+            <Ionicons name="add" size={18} color={colors.onAccent} />
+            <Text style={styles.createRoomButtonText}>{t('createARoom')}</Text>
+          </Pressable>
+          <Pressable
              onPress={() => {
                setActiveName('');
                setActiveCities([]);
                setActiveLocations([]);
                setActiveDay(null);
                setActiveTimeStart(null);
+               setActiveOnlyOpenSpots(DEFAULT_ROOM_FILTERS.onlyOpenSpots);
+               setActiveSortBy(DEFAULT_ROOM_FILTERS.sortBy);
                setWithFriendsOnly(false);
+               setInvitesOnly(false);
              }}
           >
-            <Text style={{color: BeerColors.textPrimary, marginTop: 10}}>{t('clearFilters')}</Text>
+            <Text style={{color: colors.textPrimary, marginTop: 10}}>{t('clearFilters')}</Text>
           </Pressable>
         </View>
       ) : (
@@ -597,128 +654,143 @@ export default function JoinRoom() {
         />
       )}
 
-      {/* Live Map FAB */}
-      <Pressable style={styles.liveMapFab} onPress={() => router.push('/live-map')}>
-        <Ionicons name="globe-outline" size={26} color={BeerColors.onAccent} />
-        {anyFriendLive ? <View style={styles.liveMapFabDot} /> : null}
-      </Pressable>
+      <LiveMapFab />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BeerColors.background,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingTop: 10,
     paddingBottom: 10,
-    paddingHorizontal: 20,
-    backgroundColor: BeerColors.background,
+    paddingLeft: 20,
+    paddingRight: 12,
+    backgroundColor: colors.background,
+    gap: 8,
   },
-  filterIconBtn: { padding: 8, backgroundColor: BeerColors.panelSoft, borderRadius: 8, borderWidth: 1, borderColor: BeerColors.borderSoft },
-  liveMapFab: {
-    position: 'absolute',
-    bottom: 110,
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: BeerColors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 8,
+  headerScroll: {
+    flex: 1,
   },
-  liveMapFabDot: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#4CAF50',
-    borderWidth: 2,
-    borderColor: BeerColors.accent,
-  },
-  withFriendsButton: {
+  headerButtons: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
+    gap: 8,
+    paddingRight: 4,
+  },
+  filterIconBtn: {
+    padding: 8,
+    backgroundColor: colors.panelSoft,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    flexShrink: 0,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
-  withFriendsButtonActive: {
-    backgroundColor: BeerColors.accent,
-    borderColor: BeerColors.accent,
+  filterChipActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
-  withFriendsButtonText: {
-    color: BeerColors.textPrimary,
-    fontSize: 13,
+  filterChipText: {
+    color: colors.textPrimary,
+    fontSize: 12,
     fontWeight: '600',
   },
-  withFriendsButtonTextActive: {
-    color: BeerColors.onAccent,
+  filterChipTextActive: {
+    color: colors.onAccent,
     fontWeight: 'bold',
+  },
+  invitesDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+    marginLeft: 2,
+  },
+  inviteByLine: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginBottom: 4,
   },
   flatListContent: { paddingBottom: 100 },
   card: {
-    backgroundColor: BeerColors.panel,
-    marginHorizontal: 20, 
-    marginBottom: 12,     
+    backgroundColor: colors.panel,
+    marginHorizontal: 20,
+    marginBottom: 12,
     borderRadius: 12,
-    flexDirection: 'row', 
+    flexDirection: 'row',
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
+    position: 'relative',
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 3,
   },
+  cardInviteDot: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#4CAF50',
+    borderWidth: 2,
+    borderColor: colors.panel,
+    zIndex: 1,
+  },
   cardLeft: { flex: 1, marginRight: 10 },
   cardRight: { alignItems: 'flex-end', justifyContent: 'space-between', minWidth: 70 },
-  title: { fontSize: 18, fontWeight: 'bold', color: BeerColors.textPrimary, marginBottom: 2 },
-  description: { fontSize: 13, color: BeerColors.textSecondary, marginBottom: 6, fontStyle: 'italic' },
+  title: { fontSize: 18, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 2 },
+  description: { fontSize: 13, color: colors.textSecondary, marginBottom: 6, fontStyle: 'italic' },
   infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  location: { fontSize: 13, color: BeerColors.textPrimary, marginLeft: 4, fontWeight: '600', textTransform: 'capitalize' },
-  time: { fontSize: 13, color: BeerColors.textSecondary, marginLeft: 4 },
+  location: { fontSize: 13, color: colors.textPrimary, marginLeft: 4, fontWeight: '600', textTransform: 'capitalize' },
+  time: { fontSize: 13, color: colors.textSecondary, marginLeft: 4 },
   countContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  peopleCount: { fontSize: 14, fontWeight: 'bold', color: BeerColors.textPrimary, marginLeft: 4 },
-  joinButton: { backgroundColor: BeerColors.accent, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: BeerColors.accent },
-  joinButtonText: { color: BeerColors.onAccent, fontWeight: 'bold', fontSize: 12 },
-  requestedBadge: { backgroundColor: BeerColors.panelSoft, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1, borderColor: BeerColors.borderSoft },
-  requestedText: { fontSize: 11, color: BeerColors.textSecondary, fontWeight: '600' },
+  peopleCount: { fontSize: 14, fontWeight: 'bold', color: colors.textPrimary, marginLeft: 4 },
+  joinButton: { backgroundColor: colors.accent, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: colors.accent },
+  joinButtonText: { color: colors.onAccent, fontWeight: 'bold', fontSize: 12 },
+  requestedBadge: { backgroundColor: colors.panelSoft, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1, borderColor: colors.borderSoft },
+  requestedText: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyText: { color: BeerColors.textPrimary, fontSize: 16 },
-  modalOverlay: { flex: 1, backgroundColor: BeerColors.overlay, justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: BeerColors.panel, borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, height: '85%' },
+  emptyText: { color: colors.textPrimary, fontSize: 16 },
+  createRoomButton: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.accent, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, marginTop: 16 },
+  createRoomButtonText: { color: colors.onAccent, fontSize: 16, fontWeight: 'bold' },
+  modalOverlay: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: colors.panel, borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, height: '85%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', color: BeerColors.textPrimary },
-  filterLabel: { fontSize: 15, fontWeight: '700', color: BeerColors.textPrimary, marginTop: 15, marginBottom: 8 },
-  input: { backgroundColor: BeerColors.panelElevated, borderRadius: 8, padding: 12, fontSize: 14, color: BeerColors.textPrimary, borderWidth: 1, borderColor: BeerColors.borderSoft },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: colors.textPrimary },
+  filterLabel: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, marginTop: 15, marginBottom: 8 },
+  input: { backgroundColor: colors.panelElevated, borderRadius: 8, padding: 12, fontSize: 14, color: colors.textPrimary, borderWidth: 1, borderColor: colors.borderSoft },
   chipScroll: { flexDirection: 'row', marginBottom: 5 },
   wrapContainer: { flexDirection: 'row', flexWrap: 'wrap' },
-  chip: { backgroundColor: BeerColors.panelElevated, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: BeerColors.borderSoft },
-  chipActive: { backgroundColor: BeerColors.accent, borderColor: BeerColors.accent },
-  chipText: { color: BeerColors.textSecondary, fontSize: 12, textTransform: 'capitalize' },
-  chipTextActive: { color: BeerColors.onAccent, fontWeight: 'bold' },
+  chip: { backgroundColor: colors.panelElevated, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.borderSoft },
+  chipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  chipText: { color: colors.textSecondary, fontSize: 12, textTransform: 'capitalize' },
+  chipTextActive: { color: colors.onAccent, fontWeight: 'bold' },
   modalFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, marginBottom: 20 },
-  clearButton: { flex: 0.3, padding: 15, borderRadius: 12, alignItems: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: BeerColors.borderSoft },
-  clearButtonText: { color: BeerColors.textPrimary, fontWeight: 'bold' },
-  applyButton: { flex: 0.65, backgroundColor: BeerColors.accent, padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: BeerColors.accent },
-  applyButtonText: { color: BeerColors.onAccent, fontSize: 16, fontWeight: 'bold' },
-});
+  clearButton: { flex: 0.3, padding: 15, borderRadius: 12, alignItems: 'center', backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.borderSoft },
+  clearButtonText: { color: colors.textPrimary, fontWeight: 'bold' },
+  applyButton: { flex: 0.65, backgroundColor: colors.accent, padding: 15, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: colors.accent },
+  applyButtonText: { color: colors.onAccent, fontSize: 16, fontWeight: 'bold' },
+  });
+}

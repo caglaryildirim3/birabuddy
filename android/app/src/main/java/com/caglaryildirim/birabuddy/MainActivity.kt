@@ -1,4 +1,4 @@
-package com.caglaryildirim.birabuddy2
+package com.caglaryildirim.birabuddy
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

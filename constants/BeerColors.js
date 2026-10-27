@@ -10,6 +10,7 @@ const BeerColors = {
   textMuted: 'rgba(26, 26, 26, 0.45)',
   iconPrimary: '#FFC629',
   accent: '#FFC629',
+  notificationDot: '#FFC629',
   accentDark: '#E0A800',
   brand: '#FFC629',
   onAccent: '#1A1A1A',

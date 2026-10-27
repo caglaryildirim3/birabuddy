@@ -3,46 +3,46 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import LiveMapFab from '../components/LiveMapFab';
 import LiveStatusDot from '../components/LiveStatusDot';
 import UserProfile from '../components/UserProfile';
-import BeerColors from '../constants/BeerColors';
+import { useTheme } from '../contexts/ThemeContext';
 import { auth, db } from '../firebase/firebaseConfig';
 import {
   acceptFriendRequest,
   declineFriendRequest,
   getOtherUserId,
+  markAllFriendRequestNotificationsRead,
+  sendFriendRequest,
   unfriend,
 } from '../utils/friendUtils';
-import { subscribeToConversations } from '../utils/chatUtils';
+import { blockUser } from '../utils/blockUtils';
+import { isConversationUnread, subscribeToConversations } from '../utils/chatUtils';
+import { submitUserReport } from '../utils/reportUtils';
+import { getPublicUserData } from '../utils/userDocUtils';
 import { isOutTonight } from '../utils/outTonightUtils';
-
-const getUniversityFromEmail = (email) => {
-  if (!email) return '';
-  try {
-    const domainPart = email.split('@')[1];
-    if (domainPart) {
-      let cleanDomain = domainPart.replace('std.', '').replace('mail.', '').replace('ogrenci.', '');
-      let uniName = cleanDomain.replace('.edu.tr', '').replace('.edu', '');
-      return uniName.toUpperCase() + ' UNIV.';
-    }
-  } catch (e) {
-    return '';
-  }
-  return '';
-};
+import { formatUniversityDisplay, parseUniversityFromEmail } from '../utils/authUtils';
+import { isDeletedUser } from '../utils/deletedUserUtils';
+import { resolveFirstProfilePhotoUrl } from '../utils/photoUtils';
+import { loadFriendSuggestions } from '../utils/friendSuggestionUtils';
+import { getFriendNudgeErrorMessage, sendFriendNudge } from '../utils/friendNudgeUtils';
+import TabBarIconWithDot from '../components/TabBarIconWithDot';
+import { useNotificationIndicators } from '../contexts/NotificationContext';
 
 async function fetchUserPreview(uid) {
   const snap = await getDoc(doc(db, 'users', uid));
@@ -50,8 +50,13 @@ async function fetchUserPreview(uid) {
     return { uid, name: 'Unknown', university: '', photoUrl: null };
   }
   const data = snap.data();
-  const university = data.university || getUniversityFromEmail(data.email);
-  const photoUrl = Array.isArray(data.photos) && data.photos[0] ? data.photos[0] : null;
+  if (isDeletedUser(data)) {
+    return { uid, name: 'Deleted User', university: '', photoUrl: null, isOut: false, outNote: null };
+  }
+  const university = formatUniversityDisplay(
+    data.university || parseUniversityFromEmail(data.email)
+  );
+  const photoUrl = await resolveFirstProfilePhotoUrl(uid, data.photos);
   return {
     uid,
     name: data.name || data.nickname || data.instagram || 'User',
@@ -62,7 +67,7 @@ async function fetchUserPreview(uid) {
   };
 }
 
-function Avatar({ user, size = 44, onPress }) {
+function Avatar({ user, size = 44, onPress, styles }) {
   const initial = (user.name || '?').charAt(0).toUpperCase();
   const radius = size / 2;
 
@@ -87,7 +92,7 @@ function Avatar({ user, size = 44, onPress }) {
   );
 }
 
-function FriendName({ name, isOut, showStatus = false }) {
+function FriendName({ name, isOut, showStatus = false, styles }) {
   return (
     <View style={styles.nameRow}>
       {showStatus ? <LiveStatusDot isLive={isOut} size={9} /> : null}
@@ -99,6 +104,10 @@ function FriendName({ name, isOut, showStatus = false }) {
 const cleanInstagramHandle = (handle) => handle.replace(/[@\s]/g, '').toLowerCase();
 
 export default function FriendsList() {
+  const { t, i18n } = useTranslation();
+  const { colors } = useTheme();
+  const { showChatsDot, showRequestsDot, markRequestsTabSeen } = useNotificationIndicators();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const [segment, setSegment] = useState('friends');
   const [loading, setLoading] = useState(true);
@@ -114,6 +123,84 @@ export default function FriendsList() {
   const [conversations, setConversations] = useState([]);
   const [chatPartners, setChatPartners] = useState({});
   const [chatsLoading, setChatsLoading] = useState(true);
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [menuFriend, setMenuFriend] = useState(null);
+  const [reportFriend, setReportFriend] = useState(null);
+  const [reportReason, setReportReason] = useState('');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [nudgeLoadingId, setNudgeLoadingId] = useState(null);
+  const [suggestionRefreshSeed, setSuggestionRefreshSeed] = useState(0);
+  const [suggestionsRefreshing, setSuggestionsRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (!currentUid || segment !== 'requests') return;
+    markRequestsTabSeen();
+    markAllFriendRequestNotificationsRead(currentUid);
+  }, [currentUid, segment, markRequestsTabSeen]);
+
+  useEffect(() => {
+    if (!currentUid || segment !== 'add') return undefined;
+
+    let cancelled = false;
+    setSuggestionsLoading(true);
+    setSuggestionRefreshSeed(0);
+
+    loadFriendSuggestions(currentUid, { locale: i18n.language, t })
+      .then((rows) => {
+        if (!cancelled) {
+          setSuggestions(rows);
+          setSuggestionsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSuggestions([]);
+          setSuggestionsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUid, segment, i18n.language, t, friends.length, incoming.length, outgoing.length]);
+
+  const handleRefreshSuggestions = async () => {
+    if (!currentUid || suggestionsLoading || suggestionsRefreshing) return;
+
+    const nextSeed = suggestionRefreshSeed + 1;
+    setSuggestionRefreshSeed(nextSeed);
+    setSuggestionsRefreshing(true);
+
+    try {
+      const rows = await loadFriendSuggestions(currentUid, {
+        locale: i18n.language,
+        t,
+        refreshSeed: nextSeed,
+        excludeUids: suggestions.map((user) => user.uid),
+      });
+      setSuggestions(rows);
+    } catch {
+      setSuggestions([]);
+    } finally {
+      setSuggestionsRefreshing(false);
+    }
+  };
+
+  const handleSendFriendRequest = async (targetUid) => {
+    if (!currentUid || actionLoadingId) return;
+
+    setActionLoadingId(targetUid);
+    try {
+      await sendFriendRequest(currentUid, targetUid);
+      setSuggestions((prev) => prev.filter((user) => user.uid !== targetUid));
+      setSearchResults((prev) => prev.filter((user) => user.uid !== targetUid));
+    } catch (error) {
+      Alert.alert(t('error'), error.message || t('failedToSendFriendRequest'));
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   useEffect(() => {
     let unsub1 = null;
@@ -280,17 +367,18 @@ export default function FriendsList() {
   };
 
   const handleUnfriend = (item) => {
-    Alert.alert('Unfriend', `Remove ${item.name} from your friends?`, [
-      { text: 'Cancel', style: 'cancel' },
+    setMenuFriend(null);
+    Alert.alert(t('unfriend'), t('unfriendConfirmNamed', { name: item.name }), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Unfriend',
+        text: t('unfriendAction'),
         style: 'destructive',
         onPress: async () => {
           setActionLoadingId(item.docId);
           try {
             await unfriend(item.docId);
           } catch (error) {
-            Alert.alert('Error', 'Failed to unfriend');
+            Alert.alert(t('error'), t('failedToUnfriend'));
           } finally {
             setActionLoadingId(null);
           }
@@ -299,12 +387,61 @@ export default function FriendsList() {
     ]);
   };
 
+  const handleBlockFriend = (item) => {
+    setMenuFriend(null);
+    Alert.alert(t('blockUser'), t('blockUserConfirm', { name: item.name }), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('blockAction'),
+        style: 'destructive',
+        onPress: async () => {
+          setActionLoadingId(item.docId);
+          try {
+            await blockUser(currentUid, item.uid);
+          } catch (error) {
+            Alert.alert(t('error'), t('failedToBlockUser'));
+          } finally {
+            setActionLoadingId(null);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleReportFriend = (item) => {
+    setMenuFriend(null);
+    setReportFriend(item);
+    setReportReason('');
+  };
+
+  const submitFriendReport = async () => {
+    if (!reportFriend || !reportReason.trim()) return;
+    setReportLoading(true);
+    try {
+      const userProfile = await getPublicUserData(reportFriend.uid);
+      await submitUserReport({
+        uid: reportFriend.uid,
+        userProfile,
+        reporterUserId: currentUid,
+        reporterEmail: auth.currentUser?.email || null,
+        reason: reportReason.trim(),
+      });
+      setReportFriend(null);
+      setReportReason('');
+      Alert.alert(t('reportSent'), t('reportSentMessage'));
+    } catch (error) {
+      Alert.alert(t('error'), t('failedToReport'));
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
   const handleAccept = async (item) => {
     setActionLoadingId(item.docId);
     try {
       await acceptFriendRequest(item.docId);
     } catch (error) {
-      Alert.alert('Error', 'Failed to accept request');
+      Alert.alert(t('error'), t('failedToAcceptRequest'));
     } finally {
       setActionLoadingId(null);
     }
@@ -315,30 +452,42 @@ export default function FriendsList() {
     try {
       await declineFriendRequest(item.docId);
     } catch (error) {
-      Alert.alert('Error', 'Failed to decline request');
+      Alert.alert(t('error'), t('failedToDeclineFriendRequest'));
     } finally {
       setActionLoadingId(null);
     }
   };
 
   const handleCancelOutgoing = (item) => {
-    Alert.alert('Cancel Request', `Cancel friend request to ${item.name}?`, [
-      { text: 'Keep', style: 'cancel' },
+    Alert.alert(t('cancelFriendRequest'), t('cancelFriendRequestTo', { name: item.name }), [
+      { text: t('keep'), style: 'cancel' },
       {
-        text: 'Cancel',
+        text: t('cancel'),
         style: 'destructive',
         onPress: async () => {
           setActionLoadingId(item.docId);
           try {
             await declineFriendRequest(item.docId);
           } catch (error) {
-            Alert.alert('Error', 'Failed to cancel request');
+            Alert.alert(t('error'), t('failedToCancelFriendRequest'));
           } finally {
             setActionLoadingId(null);
           }
         },
       },
     ]);
+  };
+
+  const handleNudgeFriend = async (friend) => {
+    if (!currentUid || nudgeLoadingId) return;
+    setNudgeLoadingId(friend.uid);
+    try {
+      await sendFriendNudge(friend.uid);
+    } catch (error) {
+      Alert.alert(t('error'), getFriendNudgeErrorMessage(error, t));
+    } finally {
+      setNudgeLoadingId(null);
+    }
   };
 
   const renderFriend = ({ item }) => (
@@ -348,9 +497,9 @@ export default function FriendsList() {
         onPress={() => setSelectedUid(item.uid)}
         onLongPress={() => handleUnfriend(item)}
       >
-        <Avatar user={item} onPress={setSelectedUid} />
+        <Avatar user={item} onPress={setSelectedUid} styles={styles} />
         <View style={styles.listItemContent}>
-          <FriendName name={item.name} isOut={item.isOut} showStatus />
+          <FriendName name={item.name} isOut={item.isOut} showStatus styles={styles} />
           {item.isOut && item.outNote ? (
             <Text style={styles.outNoteSub}>{item.outNote}</Text>
           ) : item.university ? (
@@ -359,11 +508,29 @@ export default function FriendsList() {
         </View>
       </Pressable>
       {actionLoadingId === item.docId ? (
-        <ActivityIndicator size="small" color={BeerColors.accent} />
+        <ActivityIndicator size="small" color={colors.accent} />
       ) : (
-        <Pressable style={styles.chatIconButton} onPress={() => openChatWithFriend(item)} hitSlop={8}>
-          <Ionicons name="chatbubble-outline" size={20} color={BeerColors.accent} />
-        </Pressable>
+        <View style={styles.friendActions}>
+          <Pressable
+            style={styles.chatIconButton}
+            onPress={() => handleNudgeFriend(item)}
+            disabled={nudgeLoadingId === item.uid}
+            hitSlop={8}
+            accessibilityLabel={t('nudgeFriend')}
+          >
+            {nudgeLoadingId === item.uid ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Text style={styles.nudgeEmoji}>👉</Text>
+            )}
+          </Pressable>
+          <Pressable style={styles.chatIconButton} onPress={() => openChatWithFriend(item)} hitSlop={8}>
+            <Ionicons name="chatbubble-outline" size={20} color={colors.accent} />
+          </Pressable>
+          <Pressable style={styles.chatIconButton} onPress={() => setMenuFriend(item)} hitSlop={8}>
+            <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+          </Pressable>
+        </View>
       )}
     </View>
   );
@@ -373,26 +540,33 @@ export default function FriendsList() {
     if (!partner) {
       return (
         <View style={styles.listItem}>
-          <ActivityIndicator size="small" color={BeerColors.accent} />
+          <ActivityIndicator size="small" color={colors.accent} />
         </View>
       );
     }
 
     const isMe = item.lastSenderId === currentUid;
+    const hasUnread = isConversationUnread(item, currentUid);
     const preview = item.lastMessage
       ? `${isMe ? 'You: ' : ''}${item.lastMessage}`
       : 'No messages yet';
 
     return (
       <Pressable style={styles.listItem} onPress={() => openChatWithFriend(partner)}>
-        <Avatar user={partner} />
+        <Avatar user={partner} styles={styles} />
         <View style={styles.listItemContent}>
-          <Text style={styles.listItemName}>{partner.name}</Text>
-          <Text style={styles.chatPreview} numberOfLines={1}>
+          <Text style={[styles.listItemName, hasUnread && styles.listItemNameUnread]}>
+            {partner.name}
+          </Text>
+          <Text style={[styles.chatPreview, hasUnread && styles.chatPreviewUnread]} numberOfLines={1}>
             {preview}
           </Text>
         </View>
-        <Ionicons name="chevron-forward" size={18} color={BeerColors.textMuted} />
+        {hasUnread ? (
+          <View style={styles.chatUnreadDot} />
+        ) : (
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        )}
       </Pressable>
     );
   };
@@ -400,7 +574,7 @@ export default function FriendsList() {
   const renderIncoming = ({ item }) => (
     <View style={styles.listItem}>
       <Pressable style={styles.listItemMain} onPress={() => setSelectedUid(item.uid)}>
-        <Avatar user={item} onPress={setSelectedUid} />
+        <Avatar user={item} onPress={setSelectedUid} styles={styles} />
         <View style={styles.listItemContent}>
           <Text style={styles.listItemName}>{item.name}</Text>
           {item.university ? (
@@ -414,14 +588,14 @@ export default function FriendsList() {
           onPress={() => handleAccept(item)}
           disabled={actionLoadingId === item.docId}
         >
-          <Text style={styles.smallAcceptText}>Accept</Text>
+          <Text style={styles.smallAcceptText}>{t('accept')}</Text>
         </Pressable>
         <Pressable
           style={styles.smallDeclineButton}
           onPress={() => handleDecline(item)}
           disabled={actionLoadingId === item.docId}
         >
-          <Text style={styles.smallDeclineText}>Decline</Text>
+          <Text style={styles.smallDeclineText}>{t('decline')}</Text>
         </Pressable>
       </View>
     </View>
@@ -430,13 +604,13 @@ export default function FriendsList() {
   const renderOutgoing = ({ item }) => (
     <View style={styles.listItem}>
       <Pressable style={styles.listItemMain} onPress={() => setSelectedUid(item.uid)}>
-        <Avatar user={item} onPress={setSelectedUid} />
+        <Avatar user={item} onPress={setSelectedUid} styles={styles} />
         <View style={styles.listItemContent}>
           <Text style={styles.listItemName}>{item.name}</Text>
           {item.university ? (
             <Text style={styles.listItemSub}>{item.university}</Text>
           ) : null}
-          <Text style={styles.outgoingLabel}>Request sent</Text>
+          <Text style={styles.outgoingLabel}>{t('requestSent')}</Text>
         </View>
       </Pressable>
       <Pressable
@@ -444,7 +618,7 @@ export default function FriendsList() {
         onPress={() => handleCancelOutgoing(item)}
         disabled={actionLoadingId === item.docId}
       >
-        <Text style={styles.cancelButtonText}>Cancel</Text>
+        <Text style={styles.cancelButtonText}>{t('cancel')}</Text>
       </Pressable>
     </View>
   );
@@ -452,7 +626,7 @@ export default function FriendsList() {
   const handleIgSearch = async () => {
     const handle = cleanInstagramHandle(igSearch);
     if (!handle) {
-      Alert.alert('Error', 'Enter an Instagram username');
+      Alert.alert(t('error'), t('enterInstagramUsername'));
       return;
     }
 
@@ -469,25 +643,79 @@ export default function FriendsList() {
       }
       setSearchResults(results);
       if (results.length === 0) {
-        Alert.alert('Not found', `No user with Instagram @${handle}`);
+        Alert.alert(t('notFound'), t('userNotFoundInstagram', { handle }));
       }
     } catch (error) {
-      Alert.alert('Error', 'Search failed');
+      Alert.alert(t('error'), t('searchFailed'));
     } finally {
       setSearching(false);
     }
   };
 
   const renderAddFriend = () => (
-    <View style={styles.addSection}>
-      <Text style={styles.addTitle}>Add by Instagram</Text>
-      <Text style={styles.addSubtext}>Search for a user by their Instagram username</Text>
+    <ScrollView
+      style={styles.addScroll}
+      contentContainerStyle={styles.addSection}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={styles.suggestionsTitleRow}>
+        <Text style={styles.suggestionsTitle}>{t('suggestionPeopleToAdd')}</Text>
+        <Pressable
+          onPress={handleRefreshSuggestions}
+          disabled={suggestionsLoading || suggestionsRefreshing}
+          hitSlop={8}
+          style={styles.suggestionsRefreshButton}
+        >
+          {suggestionsRefreshing ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : (
+            <Ionicons name="refresh" size={20} color={colors.accent} />
+          )}
+        </Pressable>
+      </View>
+      {suggestionsLoading && suggestions.length === 0 ? (
+        <View style={styles.suggestionsLoading}>
+          <ActivityIndicator size="small" color={colors.accent} />
+        </View>
+      ) : suggestions.length > 0 ? (
+        suggestions.map((user) => (
+          <Pressable
+            key={user.uid}
+            style={styles.listItem}
+            onPress={() => setSelectedUid(user.uid)}
+          >
+            <Avatar user={user} onPress={setSelectedUid} styles={styles} />
+            <View style={styles.listItemContent}>
+              <Text style={styles.listItemName}>{user.name}</Text>
+              <Text style={styles.suggestionReason}>{user.reasonText}</Text>
+            </View>
+            <Pressable
+              onPress={() => handleSendFriendRequest(user.uid)}
+              disabled={actionLoadingId === user.uid}
+              hitSlop={8}
+              style={styles.addFriendButton}
+            >
+              {actionLoadingId === user.uid ? (
+                <ActivityIndicator size="small" color={colors.accent} />
+              ) : (
+                <Ionicons name="person-add-outline" size={20} color={colors.accent} />
+              )}
+            </Pressable>
+          </Pressable>
+        ))
+      ) : (
+        <Text style={styles.suggestionsEmpty}>{t('suggestionPeopleEmpty')}</Text>
+      )}
+
+      <Text style={[styles.addTitle, styles.addTitleSpaced]}>{t('addByInstagram')}</Text>
+      <Text style={styles.addSubtext}>{t('addByInstagramSub')}</Text>
       <View style={styles.searchRow}>
         <Text style={styles.atSign}>@</Text>
         <TextInput
           style={styles.searchInput}
           placeholder="username"
-          placeholderTextColor={BeerColors.textMuted}
+          placeholderTextColor={colors.textMuted}
           value={igSearch}
           onChangeText={setIgSearch}
           autoCapitalize="none"
@@ -500,9 +728,9 @@ export default function FriendsList() {
           disabled={searching}
         >
           {searching ? (
-            <ActivityIndicator size="small" color={BeerColors.onAccent} />
+            <ActivityIndicator size="small" color={colors.onAccent} />
           ) : (
-            <Text style={styles.searchButtonText}>Search</Text>
+            <Text style={styles.searchButtonText}>{t('search')}</Text>
           )}
         </Pressable>
       </View>
@@ -513,7 +741,7 @@ export default function FriendsList() {
           style={styles.listItem}
           onPress={() => setSelectedUid(user.uid)}
         >
-          <Avatar user={user} onPress={setSelectedUid} />
+          <Avatar user={user} onPress={setSelectedUid} styles={styles} />
           <View style={styles.listItemContent}>
             <Text style={styles.listItemName}>{user.name}</Text>
             <Text style={styles.listItemSub}>@{igSearch.replace(/[@\s]/g, '').toLowerCase()}</Text>
@@ -521,17 +749,28 @@ export default function FriendsList() {
               <Text style={styles.listItemSub}>{user.university}</Text>
             ) : null}
           </View>
-          <Ionicons name="person-add-outline" size={20} color={BeerColors.accent} />
+          <Pressable
+            onPress={() => handleSendFriendRequest(user.uid)}
+            disabled={actionLoadingId === user.uid}
+            hitSlop={8}
+            style={styles.addFriendButton}
+          >
+            {actionLoadingId === user.uid ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Ionicons name="person-add-outline" size={20} color={colors.accent} />
+            )}
+          </Pressable>
         </Pressable>
       ))}
-    </View>
+    </ScrollView>
   );
 
   const renderRequests = () => {
     if (incoming.length === 0 && outgoing.length === 0) {
       return (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No pending requests</Text>
+          <Text style={styles.emptyText}>{t('noPendingRequests')}</Text>
         </View>
       );
     }
@@ -555,9 +794,9 @@ export default function FriendsList() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={BeerColors.textPrimary} />
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
         </Pressable>
-        <Text style={styles.title}>Friends</Text>
+        <Text style={styles.title}>{t('friendsTitle')}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -567,52 +806,62 @@ export default function FriendsList() {
           onPress={() => setSegment('friends')}
         >
           <Text style={[styles.segmentText, segment === 'friends' && styles.segmentTextActive]}>
-            Friends {friends.length > 0 ? `(${friends.length})` : ''}
+            {t('friendsSegment')}
           </Text>
         </Pressable>
         <Pressable
           style={[styles.segment, segment === 'chats' && styles.segmentActive]}
           onPress={() => setSegment('chats')}
         >
-          <Text style={[styles.segmentText, segment === 'chats' && styles.segmentTextActive]}>
-            Chats {conversations.length > 0 ? `(${conversations.length})` : ''}
-          </Text>
+          <View style={styles.segmentLabelRow}>
+            <Text style={[styles.segmentText, segment === 'chats' && styles.segmentTextActive]}>
+              {t('chatsSegment')}
+            </Text>
+            {showChatsDot ? (
+              <View style={[styles.segmentDot, segment === 'chats' && styles.segmentDotActive]} />
+            ) : null}
+          </View>
         </Pressable>
         <Pressable
           style={[styles.segment, segment === 'requests' && styles.segmentActive]}
           onPress={() => setSegment('requests')}
         >
-          <Text style={[styles.segmentText, segment === 'requests' && styles.segmentTextActive]}>
-            Requests {incoming.length + outgoing.length > 0 ? `(${incoming.length + outgoing.length})` : ''}
-          </Text>
+          <View style={styles.segmentLabelRow}>
+            <Text style={[styles.segmentText, segment === 'requests' && styles.segmentTextActive]}>
+              {t('requestsSegment')}
+            </Text>
+            {showRequestsDot ? (
+              <View style={[styles.segmentDot, segment === 'requests' && styles.segmentDotActive]} />
+            ) : null}
+          </View>
         </Pressable>
         <Pressable
           style={[styles.segment, segment === 'add' && styles.segmentActive]}
           onPress={() => setSegment('add')}
         >
           <Text style={[styles.segmentText, segment === 'add' && styles.segmentTextActive]}>
-            Add
+            {t('addSegment')}
           </Text>
         </Pressable>
       </View>
 
       {loading && (segment === 'friends' || segment === 'requests') ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={BeerColors.accent} />
+          <ActivityIndicator size="large" color={colors.accent} />
         </View>
       ) : chatsLoading && segment === 'chats' ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={BeerColors.accent} />
+          <ActivityIndicator size="large" color={colors.accent} />
         </View>
       ) : segment === 'add' ? (
         renderAddFriend()
       ) : segment === 'chats' ? (
         conversations.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No chats yet</Text>
-            <Text style={styles.emptySubText}>Message a friend to start a conversation</Text>
+            <Text style={styles.emptyText}>{t('noChatsYet')}</Text>
+            <Text style={styles.emptySubText}>{t('messageFriendPrompt')}</Text>
             <Pressable style={styles.goAddButton} onPress={() => setSegment('friends')}>
-              <Text style={styles.goAddButtonText}>Go to Friends</Text>
+              <Text style={styles.goAddButtonText}>{t('goToFriends')}</Text>
             </Pressable>
           </View>
         ) : (
@@ -627,10 +876,10 @@ export default function FriendsList() {
       ) : segment === 'friends' ? (
         friends.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No friends yet</Text>
-            <Text style={styles.emptySubText}>Search by Instagram in the Add tab</Text>
+            <Text style={styles.emptyText}>{t('noFriendsYet')}</Text>
+            <Text style={styles.emptySubText}>{t('searchInstagramAdd')}</Text>
             <Pressable style={styles.goAddButton} onPress={() => setSegment('add')}>
-              <Text style={styles.goAddButtonText}>Add Friends</Text>
+              <Text style={styles.goAddButtonText}>{t('addFriends')}</Text>
             </Pressable>
           </View>
         ) : (
@@ -646,20 +895,98 @@ export default function FriendsList() {
         renderRequests()
       )}
 
-      <Modal visible={!!selectedUid} animationType="slide" presentationStyle="pageSheet">
-        {selectedUid && (
+      <Modal
+        visible={!!selectedUid}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setSelectedUid(null)}
+      >
+        {selectedUid ? (
           <UserProfile uid={selectedUid} onClose={() => setSelectedUid(null)} />
-        )}
+        ) : null}
       </Modal>
 
+      <Modal
+        visible={!!menuFriend}
+        transparent
+        animationType="slide"
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setMenuFriend(null)}
+      >
+        <Pressable style={styles.menuOverlay} onPress={() => setMenuFriend(null)}>
+          <Pressable style={styles.menuSheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.menuHandle} />
+            <Pressable style={styles.menuOption} onPress={() => handleUnfriend(menuFriend)}>
+              <Ionicons name="person-remove-outline" size={22} color={colors.danger} />
+              <Text style={[styles.menuOptionText, { color: colors.danger }]}>{t('unfriendAction')}</Text>
+            </Pressable>
+            <Pressable style={styles.menuOption} onPress={() => handleBlockFriend(menuFriend)}>
+              <Ionicons name="ban-outline" size={22} color={colors.danger} />
+              <Text style={[styles.menuOptionText, { color: colors.danger }]}>{t('blockAction')}</Text>
+            </Pressable>
+            <Pressable style={styles.menuOption} onPress={() => handleReportFriend(menuFriend)}>
+              <Ionicons name="flag-outline" size={22} color={colors.textSecondary} />
+              <Text style={styles.menuOptionText}>{t('reportUser')}</Text>
+            </Pressable>
+            <Pressable style={styles.menuCancel} onPress={() => setMenuFriend(null)}>
+              <Text style={styles.menuCancelText}>{t('cancel')}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={!!reportFriend}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setReportFriend(null)}
+      >
+        <SafeAreaView style={styles.reportContainer} edges={['top', 'bottom']}>
+          <View style={styles.reportHeader}>
+            <Pressable onPress={() => setReportFriend(null)} hitSlop={8}>
+              <Text style={styles.reportCancelLink}>{t('cancel')}</Text>
+            </Pressable>
+            <Text style={styles.reportTitle}>{t('reportUser')}</Text>
+            <Pressable
+              onPress={submitFriendReport}
+              disabled={!reportReason.trim() || reportLoading}
+              hitSlop={8}
+            >
+              <Text
+                style={[
+                  styles.reportSendLink,
+                  (!reportReason.trim() || reportLoading) && styles.reportSendLinkDisabled,
+                ]}
+              >
+                {t('send')}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.reportSubtitle}>
+            {reportFriend?.name}
+          </Text>
+          <TextInput
+            style={styles.reportInput}
+            placeholder={t('reportReasonPlaceholder')}
+            placeholderTextColor={colors.textMuted}
+            value={reportReason}
+            onChangeText={setReportReason}
+            multiline
+            maxLength={500}
+            autoFocus
+          />
+        </SafeAreaView>
+      </Modal>
+
+      <LiveMapFab />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BeerColors.background,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: 'row',
@@ -677,17 +1004,17 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
   },
   segmentBar: {
     flexDirection: 'row',
     marginHorizontal: 20,
     marginBottom: 12,
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     borderRadius: 14,
     padding: 4,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   segment: {
     flex: 1,
@@ -696,17 +1023,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   segmentActive: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     borderWidth: 1,
-    borderColor: BeerColors.accent,
+    borderColor: colors.accent,
   },
   segmentText: {
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',
   },
   segmentTextActive: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontWeight: '700',
   },
   loadingContainer: {
@@ -721,12 +1048,12 @@ const styles = StyleSheet.create({
   listItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     borderRadius: 14,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   listItemMain: {
     flex: 1,
@@ -745,35 +1072,169 @@ const styles = StyleSheet.create({
   listItemName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
   },
   listItemSub: {
     fontSize: 13,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   chatPreview: {
     fontSize: 13,
-    color: BeerColors.textMuted,
+    color: colors.textMuted,
     marginTop: 4,
+  },
+  chatPreviewUnread: {
+    color: colors.textPrimary,
+    fontWeight: '600',
+  },
+  listItemNameUnread: {
+    color: colors.textPrimary,
+  },
+  chatUnreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.notificationDot,
+    marginLeft: 8,
+  },
+  segmentLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  segmentDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.notificationDot,
+  },
+  segmentDotActive: {
+    backgroundColor: colors.onAccent,
+  },
+  friendActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   chatIconButton: {
     padding: 8,
-    marginLeft: 8,
+    marginLeft: 4,
+  },
+  nudgeEmoji: {
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlayHeavy,
+    justifyContent: 'flex-end',
+  },
+  menuSheet: {
+    backgroundColor: colors.panel,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    paddingBottom: 36,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  menuHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.borderStrong,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  menuOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: colors.panelElevated,
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  menuOptionText: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  menuCancel: {
+    marginTop: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  menuCancelText: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  reportContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  reportHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSoft,
+  },
+  reportTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  reportCancelLink: {
+    fontSize: 16,
+    color: colors.textSecondary,
+  },
+  reportSendLink: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.accent,
+  },
+  reportSendLinkDisabled: {
+    opacity: 0.4,
+  },
+  reportSubtitle: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  reportInput: {
+    flex: 1,
+    margin: 16,
+    padding: 14,
+    fontSize: 15,
+    color: colors.textPrimary,
+    textAlignVertical: 'top',
+    backgroundColor: colors.panelElevated,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
   },
   outgoingLabel: {
     fontSize: 12,
-    color: BeerColors.textMuted,
+    color: colors.textMuted,
     marginTop: 4,
     fontStyle: 'italic',
   },
   avatarPlaceholder: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontWeight: 'bold',
   },
   outNoteSub: {
@@ -787,39 +1248,39 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   smallAcceptButton: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
   },
   smallAcceptText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontSize: 12,
     fontWeight: 'bold',
   },
   smallDeclineButton: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   smallDeclineText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 12,
     fontWeight: '600',
   },
   cancelButton: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   cancelButtonText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 12,
     fontWeight: '600',
   },
@@ -832,52 +1293,95 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
   },
   emptySubText: {
     fontSize: 14,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     marginTop: 8,
     textAlign: 'center',
+  },
+  addScroll: {
+    flex: 1,
   },
   addSection: {
     paddingHorizontal: 20,
     paddingTop: 8,
+    paddingBottom: 32,
+  },
+  suggestionsTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  suggestionsTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.textPrimary,
+  },
+  suggestionsRefreshButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  addFriendButton: {
+    padding: 4,
+  },
+  suggestionsLoading: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  suggestionsEmpty: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  suggestionReason: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginTop: 3,
+    fontStyle: 'italic',
+  },
+  addTitleSpaced: {
+    marginTop: 8,
   },
   addTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     marginBottom: 4,
   },
   addSubtext: {
     fontSize: 14,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     marginBottom: 16,
   },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
     paddingHorizontal: 12,
     marginBottom: 16,
   },
   atSign: {
     fontSize: 16,
-    color: BeerColors.textMuted,
+    color: colors.textMuted,
     marginRight: 4,
   },
   searchInput: {
     flex: 1,
     paddingVertical: 14,
     fontSize: 16,
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
   },
   searchButton: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
@@ -887,19 +1391,19 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   searchButtonText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontWeight: 'bold',
     fontSize: 14,
   },
   goAddButton: {
     marginTop: 16,
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     paddingVertical: 14,
     paddingHorizontal: 28,
     borderRadius: 12,
   },
   goAddButtonText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontSize: 16,
     fontWeight: 'bold',
   },

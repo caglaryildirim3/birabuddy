@@ -1,61 +1,81 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, deleteDoc, doc, getDoc, getDocs } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import {
+  arrayRemove,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { auth, db } from '../firebase/firebaseConfig';
 import { useTranslation } from 'react-i18next';
-import BeerColors from '../constants/BeerColors';
+import { useTheme } from '../contexts/ThemeContext';
 import { formatDateTimeShort, parseRoomDateTime } from '../utils/dateUtils';
 import { isRoomExpired } from '../utils/roomUtils';
+import RoomCardDot from '../components/RoomCardDot';
+import { useNotificationIndicators } from '../contexts/NotificationContext';
 
 export default function ActiveRooms() {
   const { t } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { hasActiveRoomAlert } = useNotificationIndicators();
   const router = useRouter();
   const [activeRooms, setActiveRooms] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchActiveRooms = async () => {
-      if (!auth.currentUser) {
+      if (!auth.currentUser?.emailVerified) {
+        setActiveRooms([]);
         setLoading(false);
         return;
       }
 
       try {
         setLoading(true);
-        
+
+        const uid = auth.currentUser.uid;
         const roomsRef = collection(db, 'rooms');
-        const snapshot = await getDocs(roomsRef);
-        const allRooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        
+
+        const [createdSnap, joinedSnap] = await Promise.all([
+          getDocs(query(roomsRef, where('createdBy', '==', uid))),
+          getDocs(query(roomsRef, where('participants', 'array-contains', uid))),
+        ]);
+
+        const roomMap = new Map();
+        for (const roomDoc of [...createdSnap.docs, ...joinedSnap.docs]) {
+          roomMap.set(roomDoc.id, { id: roomDoc.id, ...roomDoc.data() });
+        }
+
         const myActiveRooms = [];
         const now = new Date();
 
-        for (const room of allRooms) {
-            const { date, time } = room;
-            
-            if (!date) continue;
+        for (const room of roomMap.values()) {
+          const { date, time } = room;
 
-            if (!parseRoomDateTime(date, time)) continue;
+          if (!date) continue;
+          if (!parseRoomDateTime(date, time)) continue;
+          if (isRoomExpired(date, time, now)) continue;
 
-            if (isRoomExpired(date, time, now)) continue;
-
-            const participantDoc = await getDoc(doc(db, 'rooms', room.id, 'participants', auth.currentUser.uid));
-            
-            if (participantDoc.exists() || room.createdBy === auth.currentUser.uid) {
-                
-                let createdByName = 'Unknown User';
-                try {
-                    const creatorDoc = await getDoc(doc(db, 'users', room.createdBy));
-                    if (creatorDoc.exists()) {
-                        const cData = creatorDoc.data();
-                        createdByName = cData.nickname || cData.instagram || 'User';
-                    }
-                } catch (e) {}
-
-                myActiveRooms.push({ ...room, createdByName });
+          let createdByName = 'Unknown User';
+          try {
+            const creatorDoc = await getDoc(doc(db, 'users', room.createdBy));
+            if (creatorDoc.exists()) {
+              const cData = creatorDoc.data();
+              createdByName = cData.nickname || cData.instagram || 'User';
             }
+          } catch (e) {
+            // skip creator name fetch failure
+          }
+
+          myActiveRooms.push({ ...room, createdByName });
         }
 
         setActiveRooms(myActiveRooms);
@@ -81,8 +101,12 @@ export default function ActiveRooms() {
           style: "destructive",
           onPress: async () => {
             try {
-              await deleteDoc(doc(db, 'rooms', room.id, 'participants', auth.currentUser.uid));
-              setActiveRooms(prevRooms => prevRooms.filter(r => r.id !== room.id));
+              const uid = auth.currentUser.uid;
+              await deleteDoc(doc(db, 'rooms', room.id, 'participants', uid));
+              await updateDoc(doc(db, 'rooms', room.id), {
+                participants: arrayRemove(uid),
+              });
+              setActiveRooms((prevRooms) => prevRooms.filter((r) => r.id !== room.id));
             } catch (error) {
               Alert.alert(t('error'), t('failedToLeaveRoom'));
             }
@@ -121,7 +145,7 @@ export default function ActiveRooms() {
               style={styles.browseButton}
               onPress={() => router.push('/(tabs)/discover')}
             >
-              <Text style={styles.browseButtonText}>{t('browse rooms')}</Text>
+              <Text style={styles.browseButtonText}>{t('browseRooms')}</Text>
             </Pressable>
           </View>
         ) : (
@@ -131,6 +155,7 @@ export default function ActiveRooms() {
               style={styles.card}
               onPress={() => handleRoomPress(room)}
             >
+              <RoomCardDot visible={hasActiveRoomAlert(room.id)} />
               <View style={styles.cardLeft}>
                 <Text style={styles.cardTitle} numberOfLines={1}>{room.name}</Text>
                 
@@ -139,20 +164,20 @@ export default function ActiveRooms() {
                 ) : null}
 
                 <View style={styles.infoRow}>
-                  <Ionicons name="location-outline" size={14} color={BeerColors.iconPrimary} />
+                  <Ionicons name="location-outline" size={14} color={colors.iconPrimary} />
                   <Text style={styles.location} numberOfLines={1}>{room.neighborhood || t('noLocation')}</Text>
                 </View>
                 <View style={styles.infoRow}>
-                  <Ionicons name="time-outline" size={14} color={BeerColors.iconPrimary} />
+                  <Ionicons name="time-outline" size={14} color={colors.iconPrimary} />
                   <Text style={styles.time}>{formatDateTimeShort(room.date, room.time)}</Text>
                 </View>
               </View>
 
               <View style={styles.cardRight}>
                 <View style={styles.countContainer}>
-                  <Ionicons name="people" size={16} color={BeerColors.iconPrimary} />
+                  <Ionicons name="people" size={16} color={colors.iconPrimary} />
                   <Text style={styles.peopleCount}>
-                     {room.maxParticipants} {t('max')}
+                    {(Array.isArray(room.participants) ? room.participants.length : 0)}/{room.maxParticipants || '?'}
                   </Text>
                 </View>
 
@@ -174,18 +199,19 @@ export default function ActiveRooms() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BeerColors.background,
+    backgroundColor: colors.background,
   },
   scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 40 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: BeerColors.textPrimary, fontSize: 16 },
+  loadingText: { color: colors.textPrimary, fontSize: 16 },
   
   card: {
-    backgroundColor: BeerColors.panel,
+    position: 'relative',
+    backgroundColor: colors.panel,
     marginHorizontal: 20,
     marginBottom: 12,
     borderRadius: 12,
@@ -193,7 +219,7 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -212,12 +238,12 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     marginBottom: 2,
   },
   description: {
     fontSize: 13,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     marginBottom: 6,
     fontStyle: 'italic',
   },
@@ -228,14 +254,14 @@ const styles = StyleSheet.create({
   },
   location: {
     fontSize: 13,
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     marginLeft: 4,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
   time: {
     fontSize: 13,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     marginLeft: 4,
   },
   countContainer: {
@@ -246,17 +272,17 @@ const styles = StyleSheet.create({
   peopleCount: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     marginLeft: 4,
   },
   leaveButton: {
-    backgroundColor: BeerColors.danger,
+    backgroundColor: colors.danger,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 20,
   },
   leaveButtonText: {
-    color: BeerColors.white,
+    color: colors.white,
     fontWeight: 'bold',
     fontSize: 12,
   },
@@ -268,12 +294,12 @@ const styles = StyleSheet.create({
     paddingTop: 100,
   },
   emptyIcon: { fontSize: 60, marginBottom: 20 },
-  emptyTitle: { fontSize: 22, fontWeight: 'bold', color: BeerColors.textPrimary, marginBottom: 10 },
+  emptyTitle: { fontSize: 22, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 10 },
   browseButton: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 12,
   },
-  browseButtonText: { color: BeerColors.onAccent, fontSize: 16, fontWeight: 'bold' },
+  browseButtonText: { color: colors.onAccent, fontSize: 16, fontWeight: 'bold' },
 });

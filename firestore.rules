@@ -2,6 +2,46 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerified() && request.auth.token.admin == true;
+    }
+
+    function friendshipDocId(uidA, uidB) {
+      return uidA < uidB ? uidA + '___' + uidB : uidB + '___' + uidA;
+    }
+
+    function isFriendWith(targetUid) {
+      let fid = friendshipDocId(request.auth.uid, targetUid);
+      return exists(/databases/$(database)/documents/friendships/$(fid))
+        && get(/databases/$(database)/documents/friendships/$(fid)).data.status == 'accepted';
+    }
+
+    match /livePresence/{userId} {
+      allow read: if isVerified() && (request.auth.uid == userId || isFriendWith(userId));
+      allow create, update: if isVerified()
+        && request.auth.uid == userId
+        && request.resource.data.uid == userId;
+      allow delete: if isVerified() && request.auth.uid == userId;
+    }
+
+    function moderationBlocked(uid) {
+      let privateRef = /databases/$(database)/documents/users/$(uid)/private/account;
+      return exists(privateRef)
+        && (get(privateRef).data.get('banned', false) == true
+            || (get(privateRef).data.keys().hasAll(['suspendedUntil'])
+                && get(privateRef).data.suspendedUntil > request.time));
+    }
+
+    match /emailBlocks/{email} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if isAdmin();
+    }
+
     match /rooms/{roomId} {
       function isVerified() {
         return request.auth != null && request.auth.token.email_verified == true;
@@ -13,35 +53,146 @@ service cloud.firestore {
           : creatorId + '___' + request.auth.uid;
       }
 
-      function isFriendOfCreator() {
-        let fid = friendshipIdWith(resource.data.createdBy);
+      function roomDoc() {
+        return get(/databases/$(database)/documents/rooms/$(roomId));
+      }
+
+      function isFriendOfRoomCreator(creatorId) {
+        let fid = friendshipIdWith(creatorId);
         return exists(/databases/$(database)/documents/friendships/$(fid))
           && get(/databases/$(database)/documents/friendships/$(fid)).data.status == 'accepted';
       }
 
-      function isInvolvedWithRoom() {
-        return request.auth.uid in resource.data.get('participants', [])
-          || request.auth.uid in resource.data.get('requests', [])
-          || request.auth.uid in resource.data.get('invites', []);
+      function canReadRoomData(data) {
+        return isVerified()
+          && (isAdmin()
+              || data.createdBy == request.auth.uid
+              || data.get('visibility', 'public') != 'private'
+              || isFriendOfRoomCreator(data.createdBy)
+              || request.auth.uid in data.get('participants', [])
+              || request.auth.uid in data.get('requests', [])
+              || request.auth.uid in data.get('invites', []));
       }
 
       function canReadRoom() {
-        return isVerified()
-          && (resource.data.createdBy == request.auth.uid
-              || resource.data.get('visibility', 'public') != 'private'
-              || isFriendOfCreator()
-              || isInvolvedWithRoom());
+        return canReadRoomData(resource.data);
       }
 
+      function canReadRoomFromStore() {
+        return exists(/databases/$(database)/documents/rooms/$(roomId))
+          && canReadRoomData(roomDoc().data);
+      }
+
+      function isVerifiedNotBlocked() {
+        return isVerified() && !moderationBlocked(request.auth.uid);
+      }
+
+      function isCreator() {
+        return resource.data.createdBy == request.auth.uid;
+      }
+
+      function isParticipant() {
+        return request.auth.uid in resource.data.get('participants', []);
+      }
+
+      function joinRequestKeys() {
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return keys.hasOnly(['requests'])
+          || keys.hasOnly(['requestTimestamps'])
+          || keys.hasOnly(['requests', 'requestTimestamps']);
+      }
+
+      function isAddingSelfToRequests() {
+        return request.auth.uid in request.resource.data.get('requests', [])
+          && !(request.auth.uid in resource.data.get('requests', []));
+      }
+
+      function isRemovingSelfFromRequests() {
+        return request.auth.uid in resource.data.get('requests', [])
+          && !(request.auth.uid in request.resource.data.get('requests', []));
+      }
+
+      function hostRoomKeys() {
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return keys.hasOnly(['requests'])
+          || keys.hasOnly(['participants'])
+          || keys.hasOnly(['requests', 'participants'])
+          || keys.hasOnly(['invites'])
+          || keys.hasOnly(['inviteMeta'])
+          || keys.hasOnly(['invites', 'inviteMeta']);
+      }
+
+      allow read: if isAdmin();
       allow read: if canReadRoom();
-      allow write: if isVerified();
+
+      allow create: if isVerifiedNotBlocked()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.auth.uid in request.resource.data.get('participants', [])
+        && request.resource.data.get('requests', []).size() == 0
+        && request.resource.data.get('invites', []).size() == 0
+        && request.resource.data.isActive == true;
+
+      allow update: if isVerifiedNotBlocked() && isCreator() && hostRoomKeys();
+
+      allow update: if isVerifiedNotBlocked()
+        && joinRequestKeys()
+        && isAddingSelfToRequests()
+        && !isParticipant()
+        && !isCreator();
+
+      allow update: if isVerifiedNotBlocked()
+        && joinRequestKeys()
+        && isRemovingSelfFromRequests();
+
+      allow update: if isVerifiedNotBlocked()
+        && isParticipant()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
+        && request.auth.uid in resource.data.get('participants', [])
+        && !(request.auth.uid in request.resource.data.get('participants', []));
+
+      allow delete: if isVerifiedNotBlocked() && isCreator();
 
       match /messages/{messageId} {
-        allow read, write: if request.auth != null && request.auth.token.email_verified == true;
+        allow read: if isAdmin();
+        allow read: if isVerified() && canReadRoomFromStore();
+
+        allow create: if isVerifiedNotBlocked()
+          && canReadRoomFromStore()
+          && request.auth.uid in roomDoc().data.get('participants', [])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.sender is string
+          && (!('likes' in request.resource.data) || request.resource.data.likes is list)
+          && (!('replyTo' in request.resource.data) || request.resource.data.replyTo is map);
+
+        allow update: if isVerifiedNotBlocked()
+          && canReadRoomFromStore()
+          && request.auth.uid in roomDoc().data.get('participants', [])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
+          && request.resource.data.likes is list;
+
+        allow delete: if isVerifiedNotBlocked()
+          && roomDoc().data.createdBy == request.auth.uid;
       }
 
       match /participants/{participantId} {
-        allow read, write: if request.auth != null && request.auth.token.email_verified == true;
+        allow read: if canReadRoomFromStore();
+
+        allow create: if isVerifiedNotBlocked() && (
+          (participantId == request.auth.uid
+            && request.resource.data.uid == request.auth.uid
+            && roomDoc().data.createdBy == request.auth.uid)
+          || (roomDoc().data.createdBy == request.auth.uid
+            && participantId == request.resource.data.uid
+            && request.resource.data.uid in roomDoc().data.get('requests', []))
+        );
+
+        allow delete: if isVerifiedNotBlocked() && (
+          participantId == request.auth.uid
+          || roomDoc().data.createdBy == request.auth.uid
+        );
+
+        allow update: if false;
       }
     }
 
@@ -50,9 +201,85 @@ service cloud.firestore {
         return request.auth != null && request.auth.token.email_verified == true;
       }
 
-      allow create: if request.auth != null && request.auth.uid == userId;
+      function privateAccountPath() {
+        return /databases/$(database)/documents/users/$(userId)/private/account;
+      }
+
+      function isNotSoftDeleted() {
+        return !exists(privateAccountPath())
+          || get(privateAccountPath()).data.get('isDeleted', false) != true;
+      }
+
+      function privateFieldNames() {
+        return [
+          'email', 'blockedIds', 'punishmentHistory',
+          'kvkkConsent', 'kvkkConsentDate', 'kvkkConsentVersion',
+          'ageConfirmed', 'ageConfirmationDate',
+          'termsAccepted', 'termsAcceptanceDate', 'termsVersion',
+          'expoPushToken', 'banned', 'suspendedUntil',
+          'isDeleted', 'deletedAt', 'createdAt', 'lastLogin',
+          'emailVerified', 'onboardingComplete', 'notificationPrefs', 'loginHandle'
+        ];
+      }
+
+      function hasNoPrivateFields(data) {
+        return !data.keys().hasAny(privateFieldNames());
+      }
+
+      function userPublicSelfUpdate() {
+        return isVerified()
+          && request.auth.uid == userId
+          && isNotSoftDeleted()
+          && hasNoPrivateFields(request.resource.data);
+      }
+
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && hasNoPrivateFields(request.resource.data);
       allow read: if isVerified();
-      allow update, delete: if isVerified() && request.auth.uid == userId;
+      allow update: if userPublicSelfUpdate();
+      allow delete: if isVerified() && request.auth.uid == userId;
+
+      match /private/account {
+        function adminPrivateModerationUpdate() {
+          let keys = request.resource.data.diff(resource.data).affectedKeys();
+          return isAdmin()
+            && keys.hasOnly(['banned', 'suspendedUntil', 'punishmentHistory']);
+        }
+
+        function userPrivateSelfUpdate() {
+          let protectedKeys = [
+            'banned', 'suspendedUntil', 'isDeleted', 'deletedAt', 'punishmentHistory',
+            'kvkkConsent', 'kvkkConsentDate', 'kvkkConsentVersion',
+            'ageConfirmed', 'ageConfirmationDate',
+            'termsAccepted', 'termsAcceptanceDate', 'termsVersion', 'createdAt'
+          ];
+          return isVerified()
+            && request.auth.uid == userId
+            && resource.data.get('isDeleted', false) != true
+            && !request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(protectedKeys);
+        }
+
+        allow read: if isVerified() && (request.auth.uid == userId || isAdmin());
+        allow create: if request.auth != null
+          && request.auth.uid == userId
+          && !exists(/databases/$(database)/documents/users/$(userId)/private/account);
+        allow update: if userPrivateSelfUpdate() || adminPrivateModerationUpdate();
+        // No client deletes: deleting + recreating this doc would clear banned/suspendedUntil.
+        // Account deletion runs in Cloud Functions (admin SDK).
+        allow delete: if false;
+      }
+
+      match /meetupAttendance/{roomId} {
+        allow read: if isVerified() && (
+          request.auth.uid == userId
+          || isAdmin()
+          || (resource.data.coParticipantUids is list
+              && request.auth.uid in resource.data.coParticipantUids)
+        );
+        allow write: if isVerified() && request.auth.uid == userId;
+      }
     }
 
     match /loginHandles/{handle} {
@@ -66,11 +293,74 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow read, write: if request.auth != null && request.auth.token.email_verified == true;
+      function roomNotificationValid() {
+        let data = request.resource.data;
+        let roomId = data.roomId;
+        let roomPath = /databases/$(database)/documents/rooms/$(roomId);
+        return data.roomId is string
+          && exists(roomPath)
+          && (
+            (data.type == 'request'
+              && get(roomPath).data.createdBy == data.userId
+              && request.auth.uid in get(roomPath).data.get('requests', []))
+            || (data.type == 'message'
+              && request.auth.uid in get(roomPath).data.get('participants', [])
+              && data.userId in get(roomPath).data.get('participants', [])
+              && request.auth.uid != data.userId)
+            || (data.type == 'invite'
+              && get(roomPath).data.createdBy == request.auth.uid
+              && data.userId in get(roomPath).data.get('invites', []))
+            || (data.type == 'room_approved'
+              && get(roomPath).data.createdBy == request.auth.uid
+              && data.userId in get(roomPath).data.get('participants', []))
+          );
+      }
+
+      allow read: if isVerified() && resource.data.userId == request.auth.uid;
+
+      allow create: if isVerified()
+        && !moderationBlocked(request.auth.uid)
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.userId is string
+        && request.resource.data.userId != request.auth.uid
+        && request.resource.data.type in ['message', 'request', 'invite', 'room_approved']
+        && request.resource.data.read == false
+        && request.resource.data.createdAt is timestamp
+        && roomNotificationValid();
+
+      allow update: if isVerified()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read == true;
+
+      allow delete: if isVerified() && resource.data.userId == request.auth.uid;
     }
 
     match /reports/{reportId} {
-      allow read, write: if request.auth != null && request.auth.token.email_verified == true;
+      allow create: if isVerified()
+        && request.resource.data.reporterUserId == request.auth.uid
+        && request.resource.data.reportedUserId is string
+        && request.resource.data.reason is string
+        && request.resource.data.status == 'pending'
+        && request.resource.data.type in ['post', 'user']
+        && request.resource.data.createdAt is timestamp
+        && (request.resource.data.type == 'post'
+            ? request.resource.data.postId is string
+              && request.resource.data.postSnapshot is map
+            : request.resource.data.userSnapshot is map);
+
+      function adminReportUpdate() {
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return keys.hasOnly(['status']) && request.resource.data.status == 'dismissed'
+          || (keys.hasOnly(['status', 'punishment', 'resolvedAt'])
+              && request.resource.data.status == 'resolved'
+              && request.resource.data.punishment in ['ban', 'suspend_7', 'suspend_30']);
+      }
+
+      allow read: if isAdmin();
+      allow update: if isAdmin() && adminReportUpdate();
+
+      allow delete: if false;
     }
 
     match /blocks/{blockId} {
@@ -106,6 +396,7 @@ service cloud.firestore {
         && (resource == null ? isParticipantByDocId() : isParticipant());
 
       allow create: if isVerified()
+        && !moderationBlocked(request.auth.uid)
         && request.resource.data.requestedBy == request.auth.uid
         && (request.resource.data.user1Id == request.auth.uid
             || request.resource.data.user2Id == request.auth.uid)
@@ -125,34 +416,156 @@ service cloud.firestore {
         return request.auth != null && request.auth.token.email_verified == true;
       }
 
-      function isSocialUpdate() {
-        let keys = request.resource.data.diff(resource.data).affectedKeys();
-        return keys.hasOnly(['likes'])
-          || keys.hasOnly(['reactions'])
-          || keys.hasOnly(['commentsCount']);
+      function friendshipIdWith(authorId) {
+        return request.auth.uid < authorId
+          ? request.auth.uid + '___' + authorId
+          : authorId + '___' + request.auth.uid;
       }
 
-      allow read: if isVerified();
+      function isFriendOfAuthor() {
+        let fid = friendshipIdWith(resource.data.userId);
+        return exists(/databases/$(database)/documents/friendships/$(fid))
+          && get(/databases/$(database)/documents/friendships/$(fid)).data.status == 'accepted';
+      }
+
+      function isFriendsOnlyPost() {
+        return resource.data.keys().hasAll(['visibility'])
+          && resource.data.visibility == 'friends';
+      }
+
+      function canReadPost() {
+        return isVerified() && (
+          isAdmin()
+          || resource.data.userId == request.auth.uid
+          || !isFriendsOnlyPost()
+          || isFriendOfAuthor()
+        );
+      }
+
+      // Likes arrays (posts and comments): the caller may only add or remove their own uid.
+      function isOwnLikeToggle(before, after) {
+        let uid = request.auth.uid;
+        return after is list && (
+          (!(uid in before)
+            && after.size() == before.size() + 1
+            && after.toSet() == before.toSet().union([uid].toSet()))
+          || (uid in before
+            && after.size() == before.size() - 1
+            && after.toSet() == before.toSet().difference([uid].toSet()))
+        );
+      }
+
+      // Reactions map is { uid: emoji }: the caller may only set or clear their own entry.
+      function isOwnReactionUpdate() {
+        let uid = request.auth.uid;
+        let after = request.resource.data.reactions;
+        return after is map
+          && after.diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([uid])
+          && (!(uid in after) || (after[uid] is string && after[uid].size() <= 16));
+      }
+
+      function isCommentCountStep() {
+        let before = resource.data.get('commentsCount', 0);
+        let after = request.resource.data.commentsCount;
+        return after == before + 1 || after == before - 1;
+      }
+
+      function isSocialUpdate() {
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return canReadPost()
+          && !moderationBlocked(request.auth.uid)
+          && (
+            (keys.hasOnly(['likes'])
+              && isOwnLikeToggle(resource.data.get('likes', []), request.resource.data.likes))
+            || (keys.hasOnly(['reactions']) && isOwnReactionUpdate())
+            || (keys.hasOnly(['commentsCount']) && isCommentCountStep())
+          );
+      }
+
+      function isOwnerContentUpdate() {
+        let keys = request.resource.data.diff(resource.data).affectedKeys();
+        return resource.data.userId == request.auth.uid
+          && !moderationBlocked(request.auth.uid)
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.get('visibility', 'public') in ['public', 'friends']
+          && keys.hasOnly([
+            'text', 'visibility', 'photoURL', 'selfiePhotoURL', 'venueTag',
+            'city', 'university', 'drinks', 'userSnapshot'
+          ]);
+      }
+
+      // Queries only see fields the query filters on, so keys().hasAll(['visibility'])
+      // is false there and !isFriendsOnlyPost() would let any query read friends-only posts.
+      // Lists must filter on visibility == 'public', the viewer's own uid, or friends' uids.
+      function canListPost() {
+        return isVerified() && (
+          resource.data.userId == request.auth.uid
+          || resource.data.visibility == 'public'
+          || isFriendOfAuthor()
+        );
+      }
+
+      allow read: if isAdmin();
+      allow get: if canReadPost();
+      allow list: if canListPost();
 
       allow create: if isVerified()
+        && !moderationBlocked(request.auth.uid)
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.text is string
+        && request.resource.data.visibility in ['public', 'friends']
         && request.resource.data.likes.size() == 0
+        && request.resource.data.get('reactions', {}).size() == 0
         && request.resource.data.commentsCount == 0;
 
       allow update: if isVerified() && (
-        resource.data.userId == request.auth.uid
+        isOwnerContentUpdate()
         || isSocialUpdate()
       );
 
       allow delete: if isVerified() && resource.data.userId == request.auth.uid;
 
       match /comments/{commentId} {
-        allow read: if isVerified();
-        allow create: if isVerified()
+        function parentPost() {
+          return get(/databases/$(database)/documents/posts/$(postId)).data;
+        }
+
+        // Same visibility as the post itself (single-doc check, so .get() defaults are safe).
+        function canReadParentPost() {
+          let post = parentPost();
+          return isVerified() && (
+            isAdmin()
+            || post.userId == request.auth.uid
+            || post.get('visibility', 'public') != 'friends'
+            || isFriendWith(post.userId)
+          );
+        }
+
+        // Deleting a top-level comment also deletes other users' replies to it.
+        function isParentCommentAuthor() {
+          let parentId = resource.data.get('parentId', null);
+          return parentId != null
+            && get(/databases/$(database)/documents/posts/$(postId)/comments/$(parentId)).data.userId
+              == request.auth.uid;
+        }
+
+        allow read: if canReadParentPost();
+        allow create: if canReadParentPost()
+          && !moderationBlocked(request.auth.uid)
           && request.resource.data.userId == request.auth.uid
-          && request.resource.data.text is string;
-        allow delete: if isVerified() && resource.data.userId == request.auth.uid;
+          && request.resource.data.text is string
+          && request.resource.data.likes.size() == 0;
+        allow update: if canReadParentPost()
+          && !moderationBlocked(request.auth.uid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
+          && isOwnLikeToggle(resource.data.get('likes', []), request.resource.data.likes);
+        // Post owner may delete all comments (deletePost batch-deletes them).
+        allow delete: if isVerified() && (
+          resource.data.userId == request.auth.uid
+          || isAdmin()
+          || parentPost().userId == request.auth.uid
+          || isParentCommentAuthor()
+        );
       }
     }
 
@@ -163,6 +576,12 @@ service cloud.firestore {
 
       function friendshipDoc() {
         return get(/databases/$(database)/documents/friendships/$(conversationId));
+      }
+
+      function isParticipantByConversationId() {
+        return isVerified()
+          && (conversationId.matches('^' + request.auth.uid + '___.*')
+              || conversationId.matches('.*___' + request.auth.uid + '$'));
       }
 
       function isAcceptedFriend() {
@@ -184,9 +603,19 @@ service cloud.firestore {
               || request.auth.uid == request.resource.data.user2Id);
       }
 
-      allow read: if isParticipant();
+      allow read: if isAdmin();
+      allow read: if isParticipant() || isParticipantByConversationId();
+
+      function isReadReceiptUpdate() {
+        return isParticipant()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['lastReadAtUser1', 'lastReadAtUser2', 'updatedAt']);
+      }
+
+      allow update: if isReadReceiptUpdate();
 
       allow create, update: if isParticipantOnWrite()
+        && !moderationBlocked(request.auth.uid)
         && isAcceptedFriend()
         && request.resource.data.user1Id is string
         && request.resource.data.user2Id is string
@@ -194,21 +623,32 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         function canAccessMessages() {
-          return isVerified() && (
-            isAcceptedFriend()
-            || (exists(/databases/$(database)/documents/conversations/$(conversationId))
-                && (request.auth.uid == get(/databases/$(database)/documents/conversations/$(conversationId)).data.user1Id
-                    || request.auth.uid == get(/databases/$(database)/documents/conversations/$(conversationId)).data.user2Id))
-          );
+          return isVerified()
+            && (isAcceptedFriend() || isParticipantByConversationId());
         }
 
+        allow read: if isAdmin();
         allow read: if canAccessMessages();
 
         allow create: if isVerified()
+          && !moderationBlocked(request.auth.uid)
           && isAcceptedFriend()
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string
-          && request.resource.data.senderName is string;
+          && request.resource.data.senderName is string
+          && (!('likes' in request.resource.data) || request.resource.data.likes is list)
+          && (!('replyTo' in request.resource.data) || request.resource.data.replyTo is map);
+
+        // Likes: either participant can toggle their uid in likes array
+        // deletedFor: either participant can add themselves
+        allow update: if canAccessMessages()
+          && !moderationBlocked(request.auth.uid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['likes', 'deletedFor']);
+
+        // Hard delete only by the sender
+        allow delete: if canAccessMessages()
+          && resource.data.senderId == request.auth.uid;
       }
     }
 
@@ -219,6 +659,7 @@ service cloud.firestore {
 
       allow create: if request.auth != null
         && request.auth.token.email_verified == true
+        && !moderationBlocked(request.auth.uid)
         && request.resource.data.senderId == request.auth.uid;
 
       allow delete: if request.auth != null

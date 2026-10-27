@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { getFriendshipDocId } from './friendUtils';
+import { getPrivateUserData, getUserPrivateRef } from './userDocUtils';
 
 const BLOCKS = 'blocks';
 
@@ -29,7 +30,7 @@ export async function blockUser(blockerId, blockedId) {
       createdAt: serverTimestamp(),
     }),
     setDoc(
-      doc(db, 'users', blockerId),
+      getUserPrivateRef(blockerId),
       { blockedIds: arrayUnion(blockedId) },
       { merge: true }
     ),
@@ -45,10 +46,10 @@ export async function blockUser(blockerId, blockedId) {
 export async function getBlockedUserIds(blockerId) {
   if (!blockerId) return [];
 
-  const snap = await getDoc(doc(db, 'users', blockerId));
-  if (!snap.exists()) return [];
+  const data = await getPrivateUserData(blockerId);
+  if (!data) return [];
 
-  const blockedIds = snap.data().blockedIds;
+  const blockedIds = data.blockedIds;
   return Array.isArray(blockedIds) ? blockedIds.filter(Boolean) : [];
 }
 
@@ -58,7 +59,7 @@ export async function unblockUser(blockerId, blockedId) {
   await Promise.all([
     deleteDoc(doc(db, BLOCKS, getBlockDocId(blockerId, blockedId))).catch(() => {}),
     setDoc(
-      doc(db, 'users', blockerId),
+      getUserPrivateRef(blockerId),
       { blockedIds: arrayRemove(blockedId) },
       { merge: true }
     ),

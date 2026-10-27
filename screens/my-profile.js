@@ -5,12 +5,8 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { signOut } from 'firebase/auth';
 import {
   collection,
-  deleteDoc,
-  doc,
-  getDoc,
   getDocs,
   query,
-  setDoc,
   where,
 } from 'firebase/firestore';
 import * as Haptics from 'expo-haptics';
@@ -19,55 +15,83 @@ import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Modal,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import DrinkStatsSection from '../components/DrinkStatsSection';
+import LiveMapFab from '../components/LiveMapFab';
 import UserProfile from '../components/UserProfile';
 import OutTonightStatusRow from '../components/OutTonightStatusRow';
+import { useNotificationIndicators } from '../contexts/NotificationContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { auth, db, storage } from '../firebase/firebaseConfig';
-import { ensureLoginHandleForUser, updateLoginHandle } from '../utils/authUtils';
+import {
+  deleteMyAccount,
+  getAccountDeleteErrorMessage,
+} from '../utils/accountDeleteUtils';
+import {
+  ensureLoginHandleForUser,
+  cleanInstagramHandle,
+  formatUniversityDisplay,
+  getUserDisplayName,
+  isInstagramHandle,
+  parseUniversityFromEmail,
+  updateLoginHandle,
+} from '../utils/authUtils';
 import { calculateDrinkStats } from '../utils/drinkStatsUtils';
 import { getFriendIds } from '../utils/friendUtils';
+import {
+  ensurePhotoLibraryPermission,
+  PROFILE_PHOTO_PICKER_OPTIONS,
+} from '../utils/imagePickerUtils';
+import {
+  EMPTY_PHOTOS,
+  mergePhotoUrl,
+  normalizePhotos,
+  resolveProfilePhotoSlots,
+  sanitizePhotosForStorage,
+  clearProfilePhotoCache,
+  deleteProfilePhotoAtSlot,
+} from '../utils/photoUtils';
 import { uploadImageFromUri } from '../utils/storageUtils';
+import {
+  getOwnUserData,
+  getPrivateUserData,
+  getPublicUserData,
+  persistUserField,
+} from '../utils/userDocUtils';
 
 const BIO_LIMIT = 150;
 const GO_TO_BAR_LIMIT = 50;
-const PHOTO_COUNT = 5;
-const EMPTY_PHOTOS = Array(PHOTO_COUNT).fill('');
-
-const normalizePhotos = (rawPhotos) => {
-  const next = [...EMPTY_PHOTOS];
-  if (Array.isArray(rawPhotos)) {
-    rawPhotos.slice(0, PHOTO_COUNT).forEach((url, index) => {
-      if (typeof url === 'string' && url.trim()) {
-        next[index] = url;
-      }
-    });
-  }
-  return next;
-};
 
 export default function MyProfile() {
   const { t } = useTranslation();
   const user = auth.currentUser;
   const router = useRouter();
   const { colors } = useTheme();
+  const { showFriendsDot } = useNotificationIndicators();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { mainPhotoSize, smallPhotoSize } = useMemo(() => {
+    const photoGridWidth = Dimensions.get('window').width - 40;
+    const gap = 10;
+    const small = Math.floor((photoGridWidth - gap * 3) / 4);
+    return { mainPhotoSize: photoGridWidth, smallPhotoSize: small };
+  }, []);
 
   const [photos, setPhotos] = useState(EMPTY_PHOTOS);
   const [bio, setBio] = useState('');
   const [originalBio, setOriginalBio] = useState('');
   const [name, setName] = useState('');
   const [instagram, setInstagram] = useState('');
+  const [loginHandle, setLoginHandle] = useState('');
   const [major, setMajor] = useState('');
   const [age, setAge] = useState('');
   const [favDrink, setFavDrink] = useState('');
@@ -85,31 +109,15 @@ export default function MyProfile() {
   const [editValue, setEditValue] = useState('');
   const [savingField, setSavingField] = useState(false);
   const [showProfilePreview, setShowProfilePreview] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [reorderSourceIndex, setReorderSourceIndex] = useState(null);
-
-  const getUniversityFromEmail = (email) => {
-    if (!email) return '';
-    try {
-      const domainPart = email.split('@')[1];
-      if (domainPart) {
-        let cleanDomain = domainPart.replace('std.', '').replace('mail.', '').replace('ogrenci.', '');
-        let uniName = cleanDomain.replace('.edu.tr', '').replace('.edu', '');
-        return uniName.toUpperCase() + ' UNIV.';
-      }
-    } catch (e) {
-      return '';
-    }
-    return '';
-  };
 
   useEffect(() => {
     const fetchUserData = async () => {
       try {
         setLoading(true);
 
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        const data = userSnap.exists() ? userSnap.data() : {};
+        const data = (await getOwnUserData(user.uid)) || {};
 
         const fetchedInstagram = data.instagram || '';
         const fetchedMajor = data.major || '';
@@ -117,18 +125,19 @@ export default function MyProfile() {
         const fetchedFavDrink = data.favDrink || '';
         const fetchedGoToBar = data.goToBar || '';
         const fetchedBio = data.bio || '';
-        const fetchedName = data.name || user?.email?.split('@')[0] || '';
+        const fetchedName = getUserDisplayName(data, user?.email);
 
-        let fetchedUniversity = data.university;
-        if (!fetchedUniversity) {
-          fetchedUniversity = getUniversityFromEmail(user.email);
-        }
+        const fetchedUniversity = formatUniversityDisplay(
+          data.university || parseUniversityFromEmail(user.email)
+        );
 
-        setPhotos(normalizePhotos(data.photos));
+        const nextPhotos = await resolveProfilePhotoSlots(user.uid, data.photos);
+        setPhotos(nextPhotos);
         setBio(fetchedBio);
         setOriginalBio(fetchedBio);
         setName(fetchedName);
         setInstagram(fetchedInstagram);
+        setLoginHandle(data.loginHandle || fetchedInstagram);
         setMajor(fetchedMajor);
         setAge(fetchedAge);
         setFavDrink(fetchedFavDrink);
@@ -194,12 +203,30 @@ export default function MyProfile() {
 
   useEffect(() => {
     if (!user?.uid || !instagram || !user.email) return;
-    ensureLoginHandleForUser(user.uid, { instagram, email: user.email });
-  }, [user?.uid, user?.email, instagram]);
+    ensureLoginHandleForUser(user.uid, {
+      instagram,
+      email: user.email,
+      loginHandle,
+    });
+  }, [user?.uid, user?.email, instagram, loginHandle]);
 
   useFocusEffect(
     useCallback(() => {
       if (!user?.uid) return;
+
+      const refreshPhotos = async () => {
+        try {
+          const data = await getPublicUserData(user.uid);
+          if (data) {
+            const next = await resolveProfilePhotoSlots(user.uid, data.photos);
+            setPhotos(next);
+          }
+        } catch (err) {
+          console.log('Photo refresh error:', err);
+        }
+      };
+
+      refreshPhotos();
       fetchDrinkStats().catch((err) => {
         console.log('Drink stats fetch error:', err);
       });
@@ -215,19 +242,22 @@ export default function MyProfile() {
     return { valid: true };
   };
 
-  const cleanInstagramHandle = (handle) => handle.replace(/[@\s]/g, '').toLowerCase();
+  const resolveUserEmail = async () => {
+    const authEmail = user?.email?.toLowerCase();
+    if (authEmail) return authEmail;
+    const privateData = await getPrivateUserData(user.uid);
+    return privateData?.email?.toLowerCase() || null;
+  };
 
   const persistField = async (field, value) => {
-    await setDoc(
-      doc(db, 'users', user.uid),
-      { [field]: value, updatedAt: new Date() },
-      { merge: true }
-    );
+    await persistUserField(user.uid, field, value);
   };
 
   const persistPhotos = async (nextPhotos) => {
-    setPhotos(nextPhotos);
-    await persistField('photos', nextPhotos);
+    const sanitized = sanitizePhotosForStorage(nextPhotos);
+    clearProfilePhotoCache(user.uid);
+    setPhotos(sanitized);
+    await persistField('photos', sanitized);
   };
 
   const cancelReorder = () => setReorderSourceIndex(null);
@@ -241,26 +271,18 @@ export default function MyProfile() {
     await persistPhotos(next);
   };
 
-  const handleDeletePhoto = (index) => {
+  const handleDeletePhoto = async (index) => {
     if (!photos[index]) return;
 
-    Alert.alert('Delete photo', 'Remove this photo from your profile?', [
-      { text: t('cancel'), style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const next = [...photos];
-            next[index] = '';
-            await persistPhotos(next);
-            setReorderSourceIndex(null);
-          } catch (error) {
-            Alert.alert(t('error'), error.message || 'Failed to delete photo');
-          }
-        },
-      },
-    ]);
+    try {
+      await deleteProfilePhotoAtSlot(storage, user.uid, index);
+      const next = [...photos];
+      next[index] = '';
+      await persistPhotos(next);
+      setReorderSourceIndex((prev) => (prev === index ? null : prev));
+    } catch (error) {
+      Alert.alert(t('error'), error.message || t('failedToDeletePhoto'));
+    }
   };
 
   const handlePhotoPress = async (index, isMain, url) => {
@@ -288,18 +310,10 @@ export default function MyProfile() {
 
   const handlePickPhoto = async (index) => {
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert(t('error'), 'Photo library permission is required.');
-        return;
-      }
+      const hasPermission = await ensurePhotoLibraryPermission({ t, Alert });
+      if (!hasPermission) return;
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
+      const result = await ImagePicker.launchImageLibraryAsync(PROFILE_PHOTO_PICKER_OPTIONS);
 
       if (result.canceled || !result.assets?.[0]?.uri) return;
 
@@ -318,15 +332,26 @@ export default function MyProfile() {
         asset.mimeType || 'image/jpeg'
       );
 
-      let nextPhotos = [];
-      setPhotos((prev) => {
-        nextPhotos = [...prev];
-        nextPhotos[index] = downloadUrl;
-        return nextPhotos;
-      });
-      await persistField('photos', nextPhotos);
+      clearProfilePhotoCache(user.uid, index);
+
+      const userData = await getPublicUserData(user.uid);
+      const storedPhotos = userData?.photos || [];
+      const nextPhotos = mergePhotoUrl(storedPhotos, downloadUrl, index);
+      await persistPhotos(nextPhotos);
     } catch (error) {
-      Alert.alert(t('error'), error.message || 'Failed to upload photo');
+      const userData = await getPublicUserData(user.uid);
+      setPhotos(normalizePhotos(userData?.photos || []));
+      const code = error?.code || error?.message || '';
+      const isIcloudIssue =
+        String(code).includes('3164') ||
+        String(code).toLowerCase().includes('icloud') ||
+        String(code).toLowerCase().includes('network');
+      Alert.alert(
+        t('error'),
+        isIcloudIssue
+          ? `${t('failedToUploadPhoto')}\n\n${t('icloudPhotoHint')}`
+          : error.message || t('failedToUploadPhoto')
+      );
     } finally {
       setUploadingPhotoIndex(null);
     }
@@ -368,29 +393,35 @@ export default function MyProfile() {
 
       if (editField === 'name') {
         if (!valueToSave) {
-          Alert.alert(t('error'), 'Name cannot be empty.');
+          Alert.alert(t('error'), t('nameCannotBeEmpty'));
           return;
         }
         if (valueToSave.length > 40) {
-          Alert.alert(t('error'), 'Name must be 40 characters or less.');
+          Alert.alert(t('error'), t('nameTooLong40'));
           return;
         }
         await persistField('name', valueToSave);
         setName(valueToSave);
       } else if (editField === 'instagram') {
         valueToSave = cleanInstagramHandle(editValue);
-        if (!valueToSave) {
+        if (!isInstagramHandle(valueToSave)) {
           Alert.alert(t('invalidUsername'), t('enterValidInstagram'));
           return;
         }
-        await persistField('instagram', valueToSave);
+        const email = await resolveUserEmail();
+        if (!email) {
+          Alert.alert(t('error'), t('loginFailed'));
+          return;
+        }
         await updateLoginHandle({
-          oldHandle: instagram,
+          oldHandle: loginHandle || instagram,
           newHandle: valueToSave,
-          email: user.email,
+          email,
           uid: user.uid,
         });
+        await persistField('instagram', valueToSave);
         setInstagram(valueToSave);
+        setLoginHandle(valueToSave);
       } else if (editField === 'age') {
         if (valueToSave) {
           const ageValidation = validateAge(valueToSave);
@@ -403,21 +434,21 @@ export default function MyProfile() {
         }
       } else if (editField === 'major') {
         if (valueToSave.length > 50) {
-          Alert.alert(t('error'), 'Major must be 50 characters or less.');
+          Alert.alert(t('error'), t('majorTooLong'));
           return;
         }
         await persistField('major', valueToSave);
         setMajor(valueToSave);
       } else if (editField === 'favDrink') {
         if (valueToSave.length > 30) {
-          Alert.alert(t('error'), 'Favorite drink must be 30 characters or less.');
+          Alert.alert(t('error'), t('favoriteDrinkTooLong'));
           return;
         }
         await persistField('favDrink', valueToSave);
         setFavDrink(valueToSave);
       } else if (editField === 'goToBar') {
         if (valueToSave.length > GO_TO_BAR_LIMIT) {
-          Alert.alert(t('error'), `Go-to bar must be ${GO_TO_BAR_LIMIT} characters or less.`);
+          Alert.alert(t('error'), t('goToBarTooLong', { limit: GO_TO_BAR_LIMIT }));
           return;
         }
         await persistField('goToBar', valueToSave);
@@ -426,6 +457,10 @@ export default function MyProfile() {
 
       closeEditModal();
     } catch (error) {
+      if (error?.code === 'handle-taken') {
+        Alert.alert(t('invalidUsername'), t('usernameAlreadyTaken'));
+        return;
+      }
       Alert.alert(t('error'), t('failedToUpdateProfile', { error: error.message }));
     } finally {
       setSavingField(false);
@@ -463,12 +498,16 @@ export default function MyProfile() {
               text: t('yesDeleteEverything'),
               style: 'destructive',
               onPress: async () => {
+                if (!user || deletingAccount) return;
+                setDeletingAccount(true);
                 try {
-                  await deleteDoc(doc(db, 'users', user.uid));
-                  await user.delete();
+                  await deleteMyAccount();
+                  await signOut(auth);
                   router.replace('/login');
                 } catch (err) {
-                  Alert.alert(t('error'), t('failedToDelete', { error: err.message }));
+                  Alert.alert(t('error'), getAccountDeleteErrorMessage(err, t));
+                } finally {
+                  setDeletingAccount(false);
                 }
               },
             },
@@ -510,7 +549,7 @@ export default function MyProfile() {
           <View style={[styles.photoPlaceholder, { width: size, height: size }]}>
             <Ionicons
               name={isMain ? 'camera' : 'add'}
-              size={isMain ? 28 : 20}
+              size={isMain ? 36 : 20}
               color={colors.textMuted}
             />
           </View>
@@ -557,7 +596,7 @@ export default function MyProfile() {
   const getEditModalTitle = () => {
     switch (editField) {
       case 'name':
-        return 'Name';
+        return t('nameLabel');
       case 'instagram':
         return t('editInstagram');
       case 'age':
@@ -567,7 +606,7 @@ export default function MyProfile() {
       case 'favDrink':
         return t('favoriteDrink');
       case 'goToBar':
-        return 'Go-to bar';
+        return t('goToBarLabel');
       default:
         return t('editProfile');
     }
@@ -576,17 +615,17 @@ export default function MyProfile() {
   const getEditPlaceholder = () => {
     switch (editField) {
       case 'name':
-        return 'Your name';
+        return t('yourNamePlaceholder');
       case 'instagram':
-        return 'your_handle (no @)';
+        return t('instagramEditPlaceholder');
       case 'age':
-        return 'Your age';
+        return t('yourAgePlaceholder');
       case 'major':
-        return 'Your major';
+        return t('yourMajorPlaceholder');
       case 'favDrink':
-        return 'Your favorite drink';
+        return t('yourFavoriteDrinkPlaceholder');
       case 'goToBar':
-        return 'Your favorite bar';
+        return t('yourFavoriteBarPlaceholder');
       default:
         return '';
     }
@@ -618,6 +657,7 @@ export default function MyProfile() {
           <ActivityIndicator size="large" color={colors.textPrimary} />
           <Text style={styles.loadingText}>{t('loadingProfile')}</Text>
         </View>
+        <LiveMapFab />
       </SafeAreaView>
     );
   }
@@ -655,17 +695,15 @@ export default function MyProfile() {
         <View style={styles.photoSection}>
           {reorderSourceIndex !== null ? (
             <View style={styles.reorderBanner}>
-              <Text style={styles.reorderBannerText}>Tap another photo to swap</Text>
+              <Text style={styles.reorderBannerText}>{t('tapPhotoToSwap')}</Text>
               <Pressable onPress={cancelReorder} hitSlop={8}>
-                <Text style={styles.reorderCancelText}>Cancel</Text>
+                <Text style={styles.reorderCancelText}>{t('cancel')}</Text>
               </Pressable>
             </View>
-          ) : (
-            <Text style={styles.photoHint}>Hold a photo, then tap another to reorder</Text>
-          )}
-          {renderPhotoSlot(0, 140, true)}
+          ) : null}
+          {renderPhotoSlot(0, mainPhotoSize, true)}
           <View style={styles.smallPhotoRow}>
-            {[1, 2, 3, 4].map((index) => renderPhotoSlot(index, 72))}
+            {[1, 2, 3, 4].map((index) => renderPhotoSlot(index, smallPhotoSize))}
           </View>
         </View>
 
@@ -673,18 +711,28 @@ export default function MyProfile() {
         <OutTonightStatusRow />
 
         <Pressable style={styles.friendsNavButton} onPress={() => router.push('/friends-list')}>
-          <Text style={styles.friendsNavButtonText}>👥 Friends</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          <Text style={styles.friendsNavButtonText}>{t('friendsNav')}</Text>
+          <View style={styles.friendsNavRight}>
+            {showFriendsDot ? <View style={styles.friendsNavDot} /> : null}
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </View>
+        </Pressable>
+
+        <Pressable style={styles.friendsNavButton} onPress={() => router.push('/post-archive')}>
+          <Text style={styles.friendsNavButtonText}>{t('archive')}</Text>
+          <View style={styles.friendsNavRight}>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </View>
         </Pressable>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Bio</Text>
+          <Text style={styles.sectionTitle}>{t('bio')}</Text>
           <TextInput
             style={styles.bioInput}
             value={bio}
             onChangeText={(text) => setBio(text.slice(0, BIO_LIMIT))}
             onBlur={saveBio}
-            placeholder="Tell people a bit about you..."
+            placeholder={t('bioPlaceholder')}
             placeholderTextColor={colors.textMuted}
             multiline
             maxLength={BIO_LIMIT}
@@ -698,14 +746,14 @@ export default function MyProfile() {
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Info</Text>
+          <Text style={styles.sectionTitle}>{t('info')}</Text>
           {renderInfoRow({
-            label: 'Name',
+            label: t('nameLabel'),
             value: name,
             onPress: () => openEditModal('name', name),
           })}
           {renderInfoRow({
-            label: 'University',
+            label: t('universityLabel'),
             value: university,
             readOnly: true,
           })}
@@ -730,7 +778,7 @@ export default function MyProfile() {
             onPress: () => openEditModal('favDrink', favDrink),
           })}
           {renderInfoRow({
-            label: 'Go-to bar',
+            label: t('goToBarLabel'),
             value: goToBar,
             onPress: () => openEditModal('goToBar', goToBar),
           })}
@@ -745,7 +793,7 @@ export default function MyProfile() {
           </View>
           <Pressable style={styles.statBox} onPress={() => router.push('/friends-list')}>
             <Text style={styles.statNumber}>{userStats.friends}</Text>
-            <Text style={styles.statLabel}>Friends</Text>
+            <Text style={styles.statLabel}>{t('friendsStat')}</Text>
           </Pressable>
           <View style={styles.statBox}>
             <Text style={styles.statNumber}>{userStats.roomsJoined}</Text>
@@ -771,6 +819,7 @@ export default function MyProfile() {
       >
         {user?.uid ? (
           <UserProfile
+            key={photos.join('|')}
             uid={user.uid}
             previewMode
             onClose={() => setShowProfilePreview(false)}
@@ -781,8 +830,8 @@ export default function MyProfile() {
       <Modal
         visible={!!editField}
         animationType="slide"
-        presentationStyle="pageSheet"
         transparent
+        presentationStyle="overFullScreen"
         onRequestClose={closeEditModal}
       >
         <View style={styles.modalOverlay}>
@@ -823,6 +872,8 @@ export default function MyProfile() {
           </View>
         </View>
       </Modal>
+
+      <LiveMapFab />
     </SafeAreaView>
   );
 }
@@ -877,13 +928,8 @@ function createStyles(colors) {
   },
   photoSection: {
     alignItems: 'center',
+    width: '100%',
     marginBottom: 12,
-  },
-  photoHint: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginBottom: 10,
-    textAlign: 'center',
   },
   reorderBanner: {
     flexDirection: 'row',
@@ -926,6 +972,7 @@ function createStyles(colors) {
   smallPhotoRow: {
     flexDirection: 'row',
     gap: 10,
+    width: '100%',
   },
   smallPhoto: {
     borderRadius: 14,
@@ -1045,6 +1092,17 @@ function createStyles(colors) {
     fontSize: 16,
     fontWeight: '600',
     color: colors.textPrimary,
+  },
+  friendsNavRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  friendsNavDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.notificationDot,
   },
   statsSection: {
     flexDirection: 'row',

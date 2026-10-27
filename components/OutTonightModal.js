@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
   Modal,
@@ -8,7 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import BeerColors from '../constants/BeerColors';
+import { useTheme } from '../contexts/ThemeContext';
 import { getFuzzedLiveLocation } from '../utils/locationUtils';
 import { OUT_TONIGHT_NOTE_LIMIT } from '../utils/outTonightUtils';
 
@@ -26,6 +27,9 @@ export default function OutTonightModal({
   onGoLive,
   onUpdateNote,
 }) {
+  const { t } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -62,7 +66,7 @@ export default function OutTonightModal({
           <TextInput
             style={styles.input}
             placeholder={PLACEHOLDER_SUGGESTIONS[0]}
-            placeholderTextColor={BeerColors.textMuted}
+            placeholderTextColor={colors.textMuted}
             value={note}
             onChangeText={setNote}
             maxLength={OUT_TONIGHT_NOTE_LIMIT}
@@ -71,6 +75,9 @@ export default function OutTonightModal({
           <Text style={styles.suggestions}>
             e.g. "{PLACEHOLDER_SUGGESTIONS.join('", "')}"
           </Text>
+          {mode === 'create' ? (
+            <Text style={styles.mapHint}>{t('goLiveMapHint')}</Text>
+          ) : null}
           <Text style={styles.counter}>
             {note.length}/{OUT_TONIGHT_NOTE_LIMIT}
           </Text>
@@ -81,7 +88,7 @@ export default function OutTonightModal({
             disabled={submitting}
           >
             {submitting ? (
-              <ActivityIndicator size="small" color={BeerColors.onAccent} />
+              <ActivityIndicator size="small" color={colors.onAccent} />
             ) : (
               <Text style={styles.primaryButtonText}>
                 {mode === 'edit' ? 'Save note' : 'Go live'}
@@ -100,62 +107,68 @@ export default function OutTonightModal({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: BeerColors.overlayHeavy,
+    backgroundColor: colors.overlayHeavy,
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
   card: {
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     borderRadius: 20,
     padding: 24,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 14,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     marginBottom: 16,
   },
   input: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     borderRadius: 12,
     padding: 14,
     fontSize: 16,
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   suggestions: {
     fontSize: 12,
-    color: BeerColors.textMuted,
+    color: colors.textMuted,
     marginTop: 8,
     fontStyle: 'italic',
   },
+  mapHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 8,
+    lineHeight: 17,
+  },
   counter: {
     fontSize: 12,
-    color: BeerColors.textMuted,
+    color: colors.textMuted,
     textAlign: 'right',
     marginTop: 4,
     marginBottom: 16,
   },
   primaryButton: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     marginBottom: 10,
   },
   primaryButtonText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -164,7 +177,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cancelButtonText: {
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     fontSize: 15,
     fontWeight: '600',
   },

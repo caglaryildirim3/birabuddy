@@ -1,0 +1,376 @@
+export const KVKK_TEXT = `
+# BiraBuddy Kişisel Verilerin Korunması Politikası
+
+## 1. Genel Bilgiler
+
+Bu Kişisel Verilerin Korunması Politikası, BiraBuddy mobil uygulaması tarafından toplanan, işlenen ve saklanan kişisel verilerinizin korunması amacıyla, 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") uyarınca hazırlanmıştır.
+
+**Veri Sorumlusu:** birabuddy  
+**İletişim:** birabuddy@gmail.com
+
+## 2. Önemli Uyarılar ve Sorumluluk Reddi
+
+### 2.1 Yaş Sınırı
+- Bu uygulama yalnızca 18 yaş üzeri üniversite öğrencileri içindir.
+- Kayıt sırasında 18 yaşını doldurduğunuzu beyan etmeniz zorunludur.
+- Yaş beyanınızın doğruluğu tamamen sizin sorumluluğunuzdadır.
+
+### 2.2 Uygulama Amacı
+- BiraBuddy, üniversite öğrencilerinin sosyal buluşmalar organize etmesini sağlayan bir platformdur.
+- Uygulamamız alkol tüketimini teşvik etmez, özendirmez veya reklamını yapmaz.
+- Kullanıcıların buluşmalarda yapacakları aktiviteler ve tüketecekleri içecekler tamamen kendi kişisel tercihleri ve sorumluluklarıdır.
+- Platform yalnızca sosyal buluşma imkanı sunar, buluşmalardaki davranışlardan sorumlu değildir.
+
+### 2.3 Kişisel Sorumluluk
+- Buluşmalara katılım tamamen gönüllüdür ve kendi sorumluluğunuzdadır.
+- Güvenliğiniz için daima kalabalık ve güvenli mekanlarda buluşmanız önerilir.
+- Tanımadığınız kişilerle buluşurken gerekli güvenlik önlemlerini almanız gerekmektedir.
+
+## 3. Toplanan Kişisel Veriler
+
+### 3.1 Kayıt Sırasında Toplanan Veriler
+- Üniversite e-posta adresi
+- Şifre (şifrelenmiş)
+- Instagram kullanıcı adı
+- Yaş bilgisi
+
+### 3.2 Oda Oluşturma ve Katılım Sırasında Toplanan Veriler
+- Buluşma yeri (adı ,yalnızca oda katılımcıları görebilir, ve mahalle bilgisi)
+- Buluşma tarihi ve saati
+- Katılımcı sayısı
+
+### 3.3 Uygulama Kullanımı Sırasında Oluşan Veriler
+- Chat mesajları (yalnızca oda katılımcıları arasında)
+- Oda katılım istekleri
+- Uygulama kullanım logları
+- Okuduğu bölüm
+
+## 4. Kişisel Verilerin İşlenme Amaçları
+
+Kişisel verileriniz aşağıdaki amaçlarla işlenmektedir:
+
+### 4.1 Ana Amaçlar
+- Sosyal buluşma odalarının oluşturulması ve yönetimi
+- Kullanıcılar arası etkileşimin sağlanması
+- Güvenli ve düzenli platform sunumu
+- Yaş sınırının kontrolü (üniversite e-postası ve kişisel beyan ile)
+
+### 4.2 Güvenlik Amaçları
+- Platformun kötüye kullanımının önlenmesi
+- Şikayet ve raporların değerlendirilmesi
+- Teknik güvenlik tedbirlerinin uygulanması
+
+## 5. Veri Paylaşımı ve Görünürlük
+
+### 5.1 Herkese Açık Bilgiler
+Aşağıdaki bilgileriniz diğer kullanıcılar tarafından görülebilir:
+- Instagram kullanıcı adı
+- Yaş
+- Okuduğu bölüm
+- En sevilen içecek
+- Buluşma yerinin bulunduğu mahalle
+
+### 5.2 Oda Katılımcılarına Özel Bilgiler
+- Buluşma yerinin adı 
+- Chat mesajları
+- Oda detayları
+
+### 5.3 Özel Bilgiler
+Aşağıdaki bilgiler yalnızca sizin göreceğiniz bilgilerdir:
+- E-posta adresi
+- Şifre bilgileri
+
+## 6. Veri Saklama Süreleri
+
+- **Aktif hesaplar:** Hesabınız silinene kadar
+- **Silinen hesaplar:** Silme talebinden itibaren makul süre içinde
+- **Chat verileri:** Oda kapandıktan sonra makul bir süre (güvenlik amaçlı)
+- **Log kayıtları:** Güvenlik amaçlı olarak sınırlı süre
+
+## 7. Veri Güvenliği
+
+### 7.1 Teknik Önlemler
+- Verileriniz Firebase Firestore altyapısı kullanılarak saklanır
+- Şifreler güvenli yöntemlerle şifrelenir
+- Düzenli güvenlik güncellemeleri yapılır
+
+### 7.2 İdari Önlemler
+- Verilere erişim sınırlıdır ve kontrol altındadır
+- Düzenli güvenlik denetimleri yapılır
+
+## 8. Veri Aktarımı
+
+Verileriniz, Firebase Firestore hizmeti kapsamında Google'ın Amerika Birleşik Devletleri'ndeki sunucularında saklanmaktadır. Bu aktarım, hizmetin teknik gereksinimlerini karşılamak amacıyla gerçekleştirilmektedir.
+
+## 9. KVKK Kapsamındaki Haklarınız
+
+KVKK'nın 11. maddesi uyarınca aşağıdaki haklara sahipsiniz:
+
+### 9.1 Temel Haklar
+- Kişisel verilerinizin işlenip işlenmediğini öğrenme
+- İşlenen kişisel verileriniz hakkında bilgi talep etme
+- İşleme amacını ve bunların amacına uygun kullanılıp kullanılmadığını öğrenme
+- Yurt içinde veya yurt dışında kişisel verilerinizin aktarıldığı üçüncü kişileri bilme
+
+### 9.2 Düzeltme ve Silme Hakları
+- Kişisel verilerinizin eksik veya yanlış işlenmiş olması hâlinde bunların düzeltilmesini isteme
+- Kişisel verilerinizin silinmesini veya yok edilmesini isteme
+- Düzeltme, silme veya yok etme işlemlerinin kişisel verilerin aktarıldığı üçüncü kişilere bildirilmesini isteme
+
+### 9.3 İtiraz Hakkı
+- İşlenen verilerin münhasıran otomatik sistemler vasıtasıyla analiz edilmesi suretiyle kişi aleyhine bir sonucun ortaya çıkması hâlinde buna itiraz etme
+- Kişisel verilerinizin kanuna aykırı olarak işlenmesi sebebiyle zarara uğramanız hâlinde zararın giderilmesini talep etme
+
+## 10. İletişim ve Başvuru
+
+Kişisel verileriniz ile ilgili her türlü soru, talep ve şikayetlerinizi aşağıdaki iletişim bilgileri üzerinden iletebilirsiniz:
+
+**E-posta:** birabuddy@gmail.com
+
+Başvurularınız en kısa sürede, en geç 30 gün içinde yanıtlanacaktır.
+
+## 11. Şikayet Hakkı
+
+KVKK kapsamındaki haklarınızın kullanımına ilişkin başvurularınızdan sonuç alamazsanız, Kişisel Verileri Koruma Kurulu'na şikayette bulunma hakkınız saklıdır.
+
+## 12. Politika Güncellemeleri
+
+Bu Politika, yasal düzenlemelerdeki değişiklikler ve uygulama güncellemeleri doğrultusunda güncellenebilir. Önemli değişiklikler uygulama üzerinden kullanıcılara bildirilecektir.
+
+## 13. Yürürlük
+
+Bu Politika, uygulama kullanımına başladığınız tarihten itibaren yürürlüktedir.
+
+---
+
+**Son Güncelleme:** 28.08.2025 
+**Versiyon:** 1.0
+
+*Bu politika, 6698 sayılı Kişisel Verilerin Korunması Kanunu ve ilgili mevzuat uyarınca hazırlanmıştır.*
+  `;
+
+export const TERMS_TEXT = `
+# BiraBuddy Kullanım Koşulları ve Gizlilik Politikası
+
+## 1. GENEL BİLGİLER
+
+BiraBuddy, üniversite öğrencilerinin sosyal buluşmalar organize etmesini sağlayan bir mobil uygulamadır. Bu döküman hem Kullanım Koşullarımızı hem de Gizlilik Politikamızı içermektedir.
+
+**Uygulama:** birabuddy  
+**İletişim:** birabuddy@gmail.com  
+**Son Güncelleme:** 28.08.2025
+
+---
+
+## 2. KULLANIM KOŞULLARI
+
+### 2.1 Kabul ve Onay
+
+birabuddy uygulamasını kullanarak aşağıdaki koşulları kabul etmiş sayılırsınız:
+- Bu kullanım koşullarını okuduğunuzu ve anladığınızı
+- 18 yaşını doldurduğunuzu ve üniversite öğrencisi olduğunuzu
+- Türkiye Cumhuriyeti yasalarına uygun davranacağınızı
+
+### 2.2 Uygulamanın Amacı ve Kapsamı
+
+**BiraBuddy'nin Amacı:**
+- Üniversite öğrencilerinin sosyal buluşmalar organize etmesi
+- Güvenli ve düzenli sosyal etkileşim platformu sunması
+- Akademik ve sosyal topluluklar oluşturması
+
+**ÖNEMLİ UYARI:** BiraBuddy alkol tüketimini teşvik etmez, özendirmez veya reklamını yapmaz. Uygulama yalnızca sosyal buluşma imkanı sunar.
+
+### 2.3 Kullanıcı Sorumlulukları
+
+#### 2.3.1 Yaş ve Kimlik Sorumluluğu
+- 18 yaşını doldurduğunuzu beyan etmek tamamen sizin sorumluluğunuzdadır
+- Sahte bilgi vermek yasaktır ve hesap kapatılmasına neden olur
+- Üniversite e-posta adresi geçerli olmalıdır
+
+#### 2.3.2 Güvenlik Sorumluluğu
+- Buluşmalara katılım tamamen gönüllü ve kendi sorumluluğunuzdadır
+- Tanımadığınız kişilerle buluşurken güvenlik önlemleri almanız önerilir
+- Kalabalık ve güvenli mekanlarda buluşmanız önerilir
+- Kişisel güvenliğiniz tamamen sizin sorumluluğunuzdadır
+
+#### 2.3.3 İçerik Sorumluluğu
+- Paylaştığınız tüm içeriklerden sorumlusunuz
+- Yasalara aykırı, hakaret içeren, tehdit edici içerik paylaşamazsınız
+- Başkalarının kişisel bilgilerini izinsiz paylaşamazsınız
+
+### 2.4 Yasak Davranışlar
+
+Aşağıdaki davranışlar kesinlikle yasaktır:
+
+#### 2.4.1 Hesap ve Kimlik İhlalleri
+- Sahte yaş beyanı
+- Başkasının kimliğini kullanma
+- Sahte üniversite e-posta adresi kullanma
+- Birden fazla hesap açma
+
+#### 2.4.2 Platform Kötüye Kullanımı
+- Spam mesajlar gönderme
+- Uygunsuz içerik paylaşma
+- Taciz edici davranışlarda bulunma
+- Ticari amaçlı kullanım
+- Alkol satışı veya temin etme
+
+#### 2.4.3 Teknik İhlaller
+- Uygulamayı hacklemek veya kırmaya çalışmak
+- Otomatik bot kullanma
+- Sistemde açık arama
+
+### 2.5 Hesap Askıya Alma ve Kapatma
+
+Hesabınız aşağıdaki durumlarda askıya alınabilir veya kapatılabilir:
+
+- Yaş hilesi yapılması
+- Spam veya uygunsuz davranış
+- Taciz veya hakaret
+- Sahte bilgi kullanımı
+- Teknik ihlaller
+- Diğer kullanıcılardan çoklu şikayet alma
+
+### 2.6 Sorumluluk Reddi
+
+- BiraBuddy, kullanıcıların buluşmalardaki davranışlarından sorumlu değildir
+- Kullanıcılar arası anlaşmazlıklarda taraf değiliz
+- Uygulamadan kaynaklanan herhangi bir zarar için sorumluluk kabul etmeyiz
+- Üçüncü parti mekanlardaki (bar, kafe vs.) olaylardan sorumlu değiliz
+
+### 2.7 Hizmet Değişiklikleri
+
+- Uygulama özelliklerini değiştirme hakkımızı saklı tutarız
+- Hizmeti geçici veya kalıcı olarak durdurma hakkımızı saklı tutarız
+- Kullanım koşullarını güncelleme hakkımızı saklı tutarız
+
+---
+
+## 3. GİZLİLİK POLİTİKASI
+
+### 3.1 Topladığımız Bilgiler
+
+#### 3.1.1 Kayıt Bilgileri
+- Üniversite e-posta adresi
+- Şifre (şifreli olarak saklanır)
+- Instagram kullanıcı adı
+- Yaş bilgisi
+- Okuduğu bölüm
+
+#### 3.1.2 Oda ve Buluşma Bilgileri
+- Buluşma yeri (adı ve mahalle)
+- Buluşma tarihi ve saati
+- Katılımcı sayısı
+- En sevilen içecek tercihi
+
+#### 3.1.3 İletişim Bilgileri
+- Chat mesajları (sadece oda katılımcıları arasında)
+- Oda katılım istekleri
+
+### 3.2 Bilgilerin Kullanımı
+
+Topladığımız bilgileri şu amaçlarla kullanırız:
+
+- Hesabınızı oluşturmak ve yönetmek
+- Sosyal buluşma odaları oluşturmak
+- Diğer kullanıcılarla eşleştirme yapmak
+- Güvenlik ve dolandırıcılık önleme
+- Uygulama performansını iyileştirmek
+- Yasal yükümlülükleri yerine getirmek
+
+### 3.3 Bilgi Paylaşımı
+
+#### 3.3.1 Herkese Açık Bilgiler
+- Instagram kullanıcı adı
+- Yaş
+- Bölüm bilgisi
+- En sevilen içecek
+
+#### 3.3.2 Oda Katılımcılarına Açık Bilgiler
+- Buluşma yerinin adı
+- Chat mesajları
+- Oda detayları
+
+#### 3.3.3 Gizli Bilgiler
+- E-posta adresi (sadece sizin görebildiğiniz)
+- Şifre bilgileri (şifreli)
+
+### 3.4 Bilgi Güvenliği
+
+- Verileriniz Firebase Firestore ile güvenli şekilde saklanır
+- Şifreler güvenli yöntemlerle şifrelenir
+- Düzenli güvenlik kontrolları yapılır
+- Yetkisiz erişimlere karşı önlemler alınır
+
+### 3.5 Bilgi Saklama
+
+- Hesabınız silinene kadar verilerinizi saklarız
+- Silinen hesaplar makul süre içinde tamamen silinir
+- Chat mesajları oda kapandıktan sonra sınırlı süre saklanır
+- Güvenlik logları sınırlı süre tutulur
+
+### 3.6 Üçüncü Taraf Hizmetler
+
+- Firebase/Google servisleri kullanılır (Amerika sunucuları)
+- Analitik veya reklam hizmeti şu an kullanılmamaktır
+- İleride reklam hizmetleri eklenebilir (önceden bildirilir)
+
+### 3.7 Bildirimler
+
+- Uygulama içi bildirimler gönderebiliriz
+- Oda davetleri, mesajlar için bildirim alabilirsiniz
+- Bildirim ayarlarınızı kontrol edebilirsiniz
+
+---
+
+## 4. HAKLARINIZ
+
+### 4.1 Veri Hakları (KVKK Kapsamında)
+
+- Verilerinizin işlenip işlenmediğini öğrenme
+- İşlenen veriler hakkında bilgi alma
+- İşlenme amacını öğrenme
+- Yanlış verilerin düzeltilmesini isteme
+- Verilerin silinmesini isteme
+- İtiraz etme hakkı
+
+### 4.2 Hesap Hakları
+
+- Hesabınızı istediğiniz zaman silebilirsiniz
+- Profil bilgilerinizi güncelleyebilirsiniz
+- Gizlilik ayarlarınızı değiştirebilirsiniz
+- Bildirimleri kapatabilirsiniz
+
+---
+
+## 5. İLETİŞİM
+
+Sorularınız, şikayetleriniz veya veri talepleriniz için:
+
+**E-posta:** birabuddy@gmail.com
+
+- Talepleriniz 30 gün içinde yanıtlanır
+- KVKK hakları için Veri Koruma Kurulu'na başvurabilirsiniz
+
+---
+
+## 6. DEĞİŞİKLİKLER
+
+- Bu koşulları istediğimiz zaman güncelleyebiliriz
+- Önemli değişiklikler uygulama üzerinden bildirilir
+- Güncellemelerden sonra kullanım devam etmesi kabul sayılır
+
+---
+
+## 7. YASAL UYUM
+
+- Bu koşullar Türkiye Cumhuriyeti yasalarına tabidir
+- Uyuşmazlıklar Türk mahkemelerinde çözülür
+- 6698 sayılı KVKK'ya uygun olarak hazırlanmıştır
+
+---
+
+**Bu dökümanı okuyarak ve uygulamayı kullanarak tüm koşulları kabul etmiş sayılırsınız.**
+
+Son güncelleme: ${new Date().toLocaleDateString('tr-TR')}
+  `;

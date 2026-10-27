@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { 
   View, 
   Text, 
   Pressable, 
   StyleSheet, 
-  SafeAreaView,
   ActivityIndicator,
   Dimensions,
   Keyboard,
@@ -13,16 +12,25 @@ import {
   Alert,
   Modal,
   Platform,
-  ScrollView,
   TextInput,
   TouchableWithoutFeedback,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { Image } from 'expo-image';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
+import { onAuthStateChanged } from 'firebase/auth';
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
@@ -30,11 +38,10 @@ import {
   limit,
   onSnapshot,
   query,
-  serverTimestamp,
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../firebase/firebaseConfig';
-import BeerColors from '../constants/BeerColors';
+import { useTheme } from '../contexts/ThemeContext';
 import { blockUser } from '../utils/blockUtils';
 import {
   acceptFriendRequest,
@@ -46,9 +53,17 @@ import {
 } from '../utils/friendUtils';
 import LiveStatusDot from './LiveStatusDot';
 import { isOutTonight } from '../utils/outTonightUtils';
+import { submitUserReport } from '../utils/reportUtils';
 import { calculateDrinkStats } from '../utils/drinkStatsUtils';
+import { formatUniversityDisplay } from '../utils/authUtils';
+import { isDeletedUser } from '../utils/deletedUserUtils';
+import { loadProfileConnectionStats } from '../utils/friendSuggestionUtils';
+import { clearProfilePhotoCache, resolveProfilePhotoUrls } from '../utils/photoUtils';
 
 export default function UserProfile({ uid, onClose, previewMode = false }) {
+  const { t, i18n } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [userStats, setUserStats] = useState({ roomsCreated: 0 });
@@ -60,26 +75,48 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [safetyActionLoading, setSafetyActionLoading] = useState(false);
+  const [connectionStats, setConnectionStats] = useState([]);
+  const [resolvedPhotos, setResolvedPhotos] = useState([]);
+  const [currentUid, setCurrentUid] = useState(auth.currentUser?.uid ?? null);
+  const scrollRef = useRef(null);
+  const translateY = useSharedValue(0);
+  const scrollOffset = useSharedValue(0);
+
+  const handleDismiss = useCallback(() => {
+    onClose?.();
+  }, [onClose]);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollOffset.value = event.contentOffset.y;
+    },
+  });
+
+  const scrollNativeGesture = useMemo(() => Gesture.Native(), []);
+  const dismissGesture = useMemo(() => Gesture.Pan()
+    .activeOffsetY([-9999, 12])
+    .failOffsetX([-24, 24])
+    .simultaneousWithExternalGesture(scrollNativeGesture)
+    .onUpdate((event) => {
+      if (scrollOffset.value <= 0 && event.translationY > 0) {
+        translateY.value = event.translationY;
+      }
+    })
+    .onEnd((event) => {
+      if (translateY.value > 90 || event.velocityY > 650) {
+        runOnJS(handleDismiss)();
+        return;
+      }
+      translateY.value = withSpring(0, { damping: 20, stiffness: 280 });
+    }), [handleDismiss, scrollNativeGesture, scrollOffset, translateY]);
+
+  const animatedContainerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
   const router = useRouter();
-  const currentUid = auth.currentUser?.uid;
   const isSelf = currentUid && uid === currentUid;
   const showPublicView = previewMode && isSelf;
-
-  // Helper to extract university from email
-  const getUniversityFromEmail = (email) => {
-    if (!email) return '';
-    try {
-      const domainPart = email.split('@')[1];
-      if (domainPart) {
-          let cleanDomain = domainPart.replace('std.', '').replace('mail.', '').replace('ogrenci.', '');
-          let uniName = cleanDomain.replace('.edu.tr', '');
-          return uniName.toUpperCase() + ' UNIV.';
-      }
-    } catch (e) {
-      return '';
-    }
-    return '';
-  };
+  const isDeletedProfile = isDeletedUser(userProfile);
 
   useEffect(() => {
     if (!uid) return undefined;
@@ -93,11 +130,10 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       (userSnap) => {
         if (userSnap.exists()) {
           const userData = userSnap.data();
-          let finalUniversity = userData.university;
-          if (!finalUniversity && userData.email) {
-            finalUniversity = getUniversityFromEmail(userData.email);
-          }
-          setUserProfile({ ...userData, university: finalUniversity });
+          setUserProfile({
+            ...userData,
+            university: formatUniversityDisplay(userData.university || ''),
+          });
         } else {
           setUserProfile({ name: 'User not found' });
         }
@@ -105,7 +141,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       },
       (error) => {
         console.error('Error fetching user profile:', error);
-        Alert.alert('Error', 'Failed to load user profile');
+        Alert.alert(t('error'), t('failedToLoadUserProfile'));
         setLoading(false);
       }
     );
@@ -125,6 +161,30 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
     return unsub;
   }, [uid]);
 
+  const photosSignature = JSON.stringify(userProfile?.photos ?? []);
+
+  useEffect(() => {
+    if (!uid || !userProfile) {
+      setResolvedPhotos([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    clearProfilePhotoCache(uid);
+    setPhotoIndex(0);
+    resolveProfilePhotoUrls(uid, userProfile.photos)
+      .then((urls) => {
+        if (!cancelled) setResolvedPhotos(urls);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedPhotos([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, photosSignature, userProfile]);
+
   const loadFriendStatus = useCallback(async () => {
     if (!currentUid || !uid || currentUid === uid) {
       setFriendStatus('none');
@@ -141,8 +201,43 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
   }, [currentUid, uid]);
 
   useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setCurrentUid(user?.uid ?? null);
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
     loadFriendStatus();
   }, [loadFriendStatus]);
+
+  useEffect(() => {
+    if (!currentUid || !uid || isSelf || previewMode) {
+      setConnectionStats([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadConnectionStats = async () => {
+      try {
+        const stats = await loadProfileConnectionStats(currentUid, uid, {
+          locale: i18n.language,
+          t,
+        });
+        if (!cancelled) setConnectionStats(stats);
+      } catch (error) {
+        console.error('Failed to load profile connection stats:', error);
+        if (!cancelled) setConnectionStats([]);
+      }
+    };
+
+    loadConnectionStats();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUid, uid, isSelf, previewMode, i18n.language, t]);
 
   useEffect(() => {
     const fetchDrinkHistory = async () => {
@@ -188,17 +283,17 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       setFriendDocId(docId);
       setFriendStatus('pending_sent');
     } catch (error) {
-      Alert.alert('Error', error.message || 'Failed to send friend request');
+      Alert.alert(t('error'), error.message || t('failedToSendFriendRequest'));
     } finally {
       setFriendActionLoading(false);
     }
   };
 
   const handleCancelRequest = () => {
-    Alert.alert('Cancel Request', 'Cancel your friend request?', [
-      { text: 'Keep', style: 'cancel' },
+    Alert.alert(t('cancelFriendRequest'), t('cancelFriendRequestConfirm'), [
+      { text: t('keep'), style: 'cancel' },
       {
-        text: 'Cancel Request',
+        text: t('cancelRequest'),
         style: 'destructive',
         onPress: async () => {
           if (!friendDocId) return;
@@ -208,7 +303,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
             setFriendStatus('none');
             setFriendDocId(null);
           } catch (error) {
-            Alert.alert('Error', 'Failed to cancel request');
+            Alert.alert(t('error'), t('failedToCancelFriendRequest'));
           } finally {
             setFriendActionLoading(false);
           }
@@ -224,7 +319,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       await acceptFriendRequest(friendDocId);
       setFriendStatus('friends');
     } catch (error) {
-      Alert.alert('Error', 'Failed to accept request');
+      Alert.alert(t('error'), t('failedToAcceptRequest'));
     } finally {
       setFriendActionLoading(false);
     }
@@ -238,17 +333,17 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       setFriendStatus('none');
       setFriendDocId(null);
     } catch (error) {
-      Alert.alert('Error', 'Failed to decline request');
+      Alert.alert(t('error'), t('failedToDeclineFriendRequest'));
     } finally {
       setFriendActionLoading(false);
     }
   };
 
   const handleUnfriend = () => {
-    Alert.alert('Unfriend', 'Remove this person from your friends?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('unfriend'), t('unfriendConfirm'), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Unfriend',
+        text: t('unfriendAction'),
         style: 'destructive',
         onPress: async () => {
           if (!friendDocId) return;
@@ -258,7 +353,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
             setFriendStatus('none');
             setFriendDocId(null);
           } catch (error) {
-            Alert.alert('Error', 'Failed to unfriend');
+            Alert.alert(t('error'), t('failedToUnfriend'));
           } finally {
             setFriendActionLoading(false);
           }
@@ -278,7 +373,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
     if (friendActionLoading) {
       return (
         <View style={styles.friendActionSection}>
-          <ActivityIndicator color={BeerColors.accent} />
+          <ActivityIndicator color={colors.accent} />
         </View>
       );
     }
@@ -287,7 +382,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       return (
         <View style={styles.friendActionSection}>
           <Pressable style={styles.addFriendButton} onPress={handleAddFriend}>
-            <Text style={styles.addFriendButtonText}>Add Friend</Text>
+            <Text style={styles.addFriendButtonText}>{t('addFriend')}</Text>
           </Pressable>
         </View>
       );
@@ -297,7 +392,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       return (
         <View style={styles.friendActionSection}>
           <Pressable style={styles.pendingSentButton} onPress={handleCancelRequest}>
-            <Text style={styles.pendingSentButtonText}>Request Sent</Text>
+            <Text style={styles.pendingSentButtonText}>{t('requestSent')}</Text>
           </Pressable>
         </View>
       );
@@ -308,10 +403,10 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
         <View style={styles.friendActionSection}>
           <View style={styles.friendActionRow}>
             <Pressable style={styles.acceptButton} onPress={handleAccept}>
-              <Text style={styles.acceptButtonText}>Accept</Text>
+              <Text style={styles.acceptButtonText}>{t('accept')}</Text>
             </Pressable>
             <Pressable style={styles.declineButton} onPress={handleDecline}>
-              <Text style={styles.declineButtonText}>Decline</Text>
+              <Text style={styles.declineButtonText}>{t('decline')}</Text>
             </Pressable>
           </View>
         </View>
@@ -323,10 +418,10 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
         <View style={styles.friendActionSection}>
           <View style={styles.friendActionRow}>
             <Pressable style={styles.messageButton} onPress={handleOpenChat}>
-              <Text style={styles.messageButtonText}>Message</Text>
+              <Text style={styles.messageButtonText}>{t('messageButton')}</Text>
             </Pressable>
             <Pressable style={styles.friendsButton} onPress={handleUnfriend}>
-              <Text style={styles.friendsButtonText}>Friends ✓</Text>
+              <Text style={styles.friendsButtonText}>{t('friendsButton')}</Text>
             </Pressable>
           </View>
         </View>
@@ -354,7 +449,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       try {
         await Linking.openURL(`https://www.instagram.com/${userProfile.instagram}`);
       } catch (fallbackError) {
-        Alert.alert('Error', 'Could not open Instagram profile');
+        Alert.alert(t('error'), t('couldNotOpenInstagram'));
       }
     }
   };
@@ -366,25 +461,24 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
 
   const submitReport = async () => {
     if (!reportReason.trim() || !currentUid || !uid) {
-      Alert.alert('Error', 'Please provide a reason');
+      Alert.alert(t('error'), t('reportReasonRequired'));
       return;
     }
 
     setSafetyActionLoading(true);
     try {
-      await addDoc(collection(db, 'reports'), {
-        reportedUserId: uid,
-        reportedUserNickname:
-          userProfile?.name || userProfile?.nickname || userProfile?.instagram || 'User',
+      await submitUserReport({
+        uid,
+        userProfile,
         reporterUserId: currentUid,
-        reason: reportReason.trim(),
-        createdAt: serverTimestamp(),
-        status: 'pending',
+        reporterEmail: auth.currentUser?.email,
+        reason: reportReason,
       });
       setReportModalVisible(false);
       setReportReason('');
+      Alert.alert(t('reportSubmittedTitle'), t('reportSubmittedMessage'));
     } catch (error) {
-      Alert.alert('Error', 'Failed to submit report');
+      Alert.alert(t('error'), t('failedToSubmitReport'));
     } finally {
       setSafetyActionLoading(false);
     }
@@ -397,12 +491,12 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
       userProfile?.name || userProfile?.nickname || userProfile?.instagram || 'this user';
 
     Alert.alert(
-      'Block user',
-      `Block ${blockTargetName}? They won't be able to interact with you and will be removed from your friends.`,
+      t('blockUser'),
+      t('blockUserConfirm', { name: blockTargetName }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Block',
+          text: t('blockAction'),
           style: 'destructive',
           onPress: async () => {
             setSafetyActionLoading(true);
@@ -412,7 +506,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
               setFriendDocId(null);
               onClose?.();
             } catch (error) {
-              Alert.alert('Error', 'Failed to block user');
+              Alert.alert(t('error'), t('failedToBlockUser'));
             } finally {
               setSafetyActionLoading(false);
             }
@@ -422,9 +516,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
     );
   };
 
-  const photos = Array.isArray(userProfile?.photos)
-    ? userProfile.photos.filter(Boolean)
-    : [];
+  const photos = resolvedPhotos;
   const displayName = userProfile?.name || userProfile?.nickname || userProfile?.instagram || 'User';
   const initial = displayName.charAt(0).toUpperCase();
   const isLive = userProfile ? isOutTonight(userProfile) : false;
@@ -448,7 +540,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
           <Text style={styles.floatingCloseText}>✕</Text>
         </Pressable>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={BeerColors.accent} />
+          <ActivityIndicator size="large" color={colors.accent} />
         </View>
       </SafeAreaView>
     );
@@ -467,13 +559,36 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
     );
   }
 
+  if (isDeletedProfile && !isSelf) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Pressable style={styles.floatingClose} onPress={onClose}>
+          <Text style={styles.floatingCloseText}>✕</Text>
+        </Pressable>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>{t('deletedUser')}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
+    <GestureDetector gesture={dismissGesture}>
+      <Animated.View style={[styles.dismissContainer, animatedContainerStyle]}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.dragHandleArea}>
+            <View style={styles.dragHandleBar} />
+          </View>
+          <GestureDetector gesture={scrollNativeGesture}>
+            <Animated.ScrollView
+              ref={scrollRef}
+              style={styles.scrollView}
+              contentContainerStyle={styles.content}
+              showsVerticalScrollIndicator={false}
+              onScroll={scrollHandler}
+              scrollEventThrottle={16}
+              bounces
+            >
         {showPublicView ? (
           <View style={styles.previewBanner}>
             <Text style={styles.previewBannerText}>How others see your profile</Text>
@@ -536,6 +651,16 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
           </View>
         </Pressable>
 
+        {!isSelf && !previewMode && connectionStats.length > 0 ? (
+          <View style={styles.connectionStatsSection}>
+            {connectionStats.map((stat) => (
+              <Text key={stat} style={styles.connectionStatText}>
+                {stat}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+
         {/* ── BIO ── */}
         {userProfile.bio?.trim() ? (
           <View style={styles.bioSection}>
@@ -547,7 +672,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
         {/* ── OUT TONIGHT BANNER ── */}
         {isLive ? (
           <View style={styles.outTonightBanner}>
-            <Text style={styles.outTonightBannerTitle}>🟢 Out tonight</Text>
+            <Text style={styles.outTonightBannerTitle}>🟢 {t('live')}</Text>
             {userProfile.outTonightNote ? (
               <Text style={styles.outTonightBannerNote}>{userProfile.outTonightNote}</Text>
             ) : null}
@@ -641,9 +766,15 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
             </Pressable>
           </View>
         ) : null}
-      </ScrollView>
+            </Animated.ScrollView>
+          </GestureDetector>
 
-      <Modal visible={reportModalVisible} transparent animationType="fade">
+      <Modal
+        visible={reportModalVisible}
+        transparent
+        animationType="fade"
+        presentationStyle="overFullScreen"
+      >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -658,7 +789,7 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
                 <TextInput
                   style={styles.reportReasonInput}
                   placeholder="Describe the issue..."
-                  placeholderTextColor={BeerColors.textMuted}
+                  placeholderTextColor={colors.textMuted}
                   value={reportReason}
                   onChangeText={setReportReason}
                   multiline
@@ -694,16 +825,32 @@ export default function UserProfile({ uid, onClose, previewMode = false }) {
         </TouchableWithoutFeedback>
       </Modal>
 
-    </SafeAreaView>
+        </SafeAreaView>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
 const PHOTO_HEIGHT = 420;
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
+  dismissContainer: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    backgroundColor: BeerColors.background,
+    backgroundColor: colors.background,
+  },
+  dragHandleArea: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  dragHandleBar: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border ?? '#ccc',
   },
   scrollView: {
     flex: 1,
@@ -719,21 +866,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorText: {
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     fontSize: 16,
   },
 
   previewBanner: {
-    backgroundColor: BeerColors.panelSoft,
+    backgroundColor: colors.panelSoft,
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   previewBannerText: {
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
@@ -743,7 +890,7 @@ const styles = StyleSheet.create({
   photoHero: {
     width: SCREEN_WIDTH,
     height: PHOTO_HEIGHT,
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
   },
   heroImage: {
     width: SCREEN_WIDTH,
@@ -752,14 +899,14 @@ const styles = StyleSheet.create({
   heroFallback: {
     width: SCREEN_WIDTH,
     height: PHOTO_HEIGHT,
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
   heroInitial: {
     fontSize: 96,
     fontWeight: 'bold',
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
   },
   floatingClose: {
     position: 'absolute',
@@ -823,13 +970,13 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   agePill: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 2,
   },
   agePillText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontWeight: 'bold',
     fontSize: 13,
   },
@@ -843,28 +990,38 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 13,
   },
+  connectionStatsSection: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    gap: 4,
+  },
+  connectionStatText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontStyle: 'italic',
+  },
 
   // ── BIO ──
   bioSection: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     borderRadius: 16,
     padding: 16,
     marginHorizontal: 16,
     marginTop: 16,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   bioTitle: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 8,
   },
   bioText: {
     fontSize: 15,
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     lineHeight: 22,
   },
 
@@ -885,7 +1042,7 @@ const styles = StyleSheet.create({
   },
   outTonightBannerNote: {
     fontSize: 14,
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     marginTop: 4,
   },
 
@@ -900,103 +1057,103 @@ const styles = StyleSheet.create({
   },
   addFriendButton: {
     flex: 1,
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
   },
   addFriendButtonText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontSize: 16,
     fontWeight: 'bold',
   },
   pendingSentButton: {
     flex: 1,
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
     opacity: 0.7,
   },
   pendingSentButtonText: {
-    color: BeerColors.textMuted,
+    color: colors.textMuted,
     fontSize: 16,
     fontWeight: '600',
   },
   acceptButton: {
     flex: 1,
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
   },
   acceptButtonText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontSize: 16,
     fontWeight: 'bold',
   },
   declineButton: {
     flex: 1,
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   declineButtonText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
   },
   messageButton: {
     flex: 1,
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
   },
   messageButtonText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontSize: 16,
     fontWeight: 'bold',
   },
   friendsButton: {
     flex: 1,
-    backgroundColor: BeerColors.panelSoft,
+    backgroundColor: colors.panelSoft,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: BeerColors.accent,
+    borderColor: colors.accent,
   },
   friendsButtonText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
 
   // ── SECTION CARDS ──
   sectionCard: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     borderRadius: 16,
     padding: 16,
     marginHorizontal: 16,
     marginTop: 16,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   sectionCardTitle: {
     fontSize: 15,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     marginBottom: 12,
   },
   sectionCardText: {
     fontSize: 15,
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     lineHeight: 22,
   },
   infoRow: {
@@ -1005,7 +1162,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: BeerColors.borderSoft,
+    borderBottomColor: colors.borderSoft,
   },
   infoRowIcon: {
     fontSize: 17,
@@ -1014,7 +1171,7 @@ const styles = StyleSheet.create({
   },
   infoRowValue: {
     fontSize: 15,
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     flex: 1,
   },
 
@@ -1027,15 +1184,15 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   vibePill: {
-    backgroundColor: BeerColors.panelSoft,
+    backgroundColor: colors.panelSoft,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderWidth: 1,
-    borderColor: BeerColors.borderStrong,
+    borderColor: colors.borderStrong,
   },
   vibePillText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -1052,12 +1209,12 @@ const styles = StyleSheet.create({
   drinkStatValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: BeerColors.accent,
+    color: colors.accent,
     marginBottom: 4,
   },
   drinkStatLabel: {
     fontSize: 11,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     textAlign: 'center',
   },
 
@@ -1071,59 +1228,59 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   safetyButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
   },
   blockButton: {
     borderColor: 'rgba(229, 57, 53, 0.35)',
     backgroundColor: 'rgba(229, 57, 53, 0.08)',
   },
   blockButtonText: {
-    color: BeerColors.danger,
+    color: colors.danger,
   },
   reportModalOverlay: {
     flex: 1,
-    backgroundColor: BeerColors.overlayHeavy,
+    backgroundColor: colors.overlayHeavy,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   reportModalContainer: {
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     borderRadius: 20,
     padding: 24,
     width: '100%',
     maxWidth: 400,
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   reportModalTitle: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 20,
     fontWeight: 'bold',
     marginBottom: 8,
   },
   reportModalSubtitle: {
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     fontSize: 15,
     marginBottom: 16,
   },
   reportReasonInput: {
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     borderRadius: 12,
     padding: 16,
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 15,
     minHeight: 120,
     textAlignVertical: 'top',
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
     marginBottom: 20,
   },
   reportModalButtons: {
@@ -1132,21 +1289,21 @@ const styles = StyleSheet.create({
   },
   reportCancelButton: {
     flex: 1,
-    backgroundColor: BeerColors.panelElevated,
+    backgroundColor: colors.panelElevated,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   reportCancelButtonText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
   reportSubmitButton: {
     flex: 1,
-    backgroundColor: BeerColors.danger,
+    backgroundColor: colors.danger,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
@@ -1155,7 +1312,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   reportSubmitButtonText: {
-    color: BeerColors.white,
+    color: colors.white,
     fontSize: 16,
     fontWeight: 'bold',
   },

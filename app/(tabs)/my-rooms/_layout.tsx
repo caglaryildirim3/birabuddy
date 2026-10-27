@@ -1,12 +1,13 @@
 import { Stack } from 'expo-router';
-import BeerColors from '../../../constants/BeerColors';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 export default function MyRoomsLayout() {
+  const { colors } = useTheme();
   return (
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: BeerColors.background },
+        contentStyle: { backgroundColor: colors.background },
         animation: 'fade',
       }}
     />

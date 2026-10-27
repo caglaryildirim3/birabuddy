@@ -11,7 +11,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { db } from '../firebase/firebaseConfig';
+import { auth, db } from '../firebase/firebaseConfig';
 
 const FRIENDSHIPS = 'friendships';
 const FRIEND_NOTIFICATIONS = 'friendNotifications';
@@ -43,6 +43,37 @@ async function createFriendNotification({ userId, type, senderId, senderName }) 
     createdAt: serverTimestamp(),
     read: false,
   });
+}
+
+async function markFriendRequestNotificationsRead(userId, senderId) {
+  if (!userId || !senderId) return;
+
+  const snap = await getDocs(
+    query(collection(db, FRIEND_NOTIFICATIONS), where('userId', '==', userId))
+  );
+
+  const toMark = snap.docs.filter(
+    (d) =>
+      d.data().type === 'friend_request' &&
+      d.data().senderId === senderId &&
+      d.data().read !== true
+  );
+
+  await Promise.all(toMark.map((d) => updateDoc(d.ref, { read: true })));
+}
+
+export async function markAllFriendRequestNotificationsRead(userId) {
+  if (!userId) return;
+
+  const snap = await getDocs(
+    query(collection(db, FRIEND_NOTIFICATIONS), where('userId', '==', userId))
+  );
+
+  const toMark = snap.docs.filter(
+    (d) => d.data().type === 'friend_request' && d.data().read !== true
+  );
+
+  await Promise.all(toMark.map((d) => updateDoc(d.ref, { read: true })));
 }
 
 export async function getFriendshipStatus(currentUid, targetUid) {
@@ -84,6 +115,18 @@ export async function getFriendIds(currentUid) {
   snap1.docs.forEach((d) => ids.add(d.data().user2Id));
   snap2.docs.forEach((d) => ids.add(d.data().user1Id));
   return Array.from(ids);
+}
+
+export async function getMutualFriendCount(currentUid, targetUid) {
+  if (!currentUid || !targetUid || currentUid === targetUid) return 0;
+
+  const [myFriendIds, theirFriendIds] = await Promise.all([
+    getFriendIds(currentUid),
+    getFriendIds(targetUid),
+  ]);
+
+  const theirFriendSet = new Set(theirFriendIds);
+  return myFriendIds.filter((friendId) => theirFriendSet.has(friendId)).length;
 }
 
 export async function sendFriendRequest(currentUid, targetUid) {
@@ -145,6 +188,16 @@ export async function acceptFriendRequest(docId) {
 }
 
 export async function declineFriendRequest(docId) {
+  const currentUid = auth.currentUser?.uid;
+  const snap = await getDoc(doc(db, FRIENDSHIPS, docId));
+  if (snap.exists()) {
+    const data = snap.data();
+    const recipientUid = data.requestedBy === data.user1Id ? data.user2Id : data.user1Id;
+    // Only the recipient can update their own notifications (Firestore rules).
+    if (currentUid === recipientUid) {
+      await markFriendRequestNotificationsRead(recipientUid, data.requestedBy);
+    }
+  }
   await deleteDoc(doc(db, FRIENDSHIPS, docId));
 }
 

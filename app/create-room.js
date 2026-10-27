@@ -1,7 +1,7 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
-import { useState } from 'react';
+import { collection, doc, serverTimestamp, setDoc, Timestamp, writeBatch } from 'firebase/firestore';
+import { useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,18 +12,21 @@ import {
   Text,
   TextInput,
   View,
-  SafeAreaView
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, db } from '../firebase/firebaseConfig';
 import { useButtonDelay } from '../hooks/useButtonDelay';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import BeerColors from '../constants/BeerColors';
+import { useTheme } from '../contexts/ThemeContext';
 import { NEIGHBORHOODS_BY_CITY, CITIES } from '../constants/locations';
 import { ROOM_VISIBILITY } from '../utils/roomUtils';
+import { recordMeetupAttendance } from '../utils/meetupAttendanceUtils';
 
 export default function CreateRoom() {
   const { t } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [city, setCity] = useState('');
@@ -154,29 +157,44 @@ export default function CreateRoom() {
       String(selectedTime.getMinutes()).padStart(2, '0');
 
     try {
-      const roomRef = await addDoc(collection(db, 'rooms'), {
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error(t('loginRequired'));
+
+      const roomRef = doc(collection(db, 'rooms'));
+      const batch = writeBatch(db);
+      batch.set(roomRef, {
         name: name.trim(),
         description: description.trim(),
         city: city,
         neighborhood: neighborhood,
         barName: barName.trim(),
         fullLocation: `${barName.trim()}, ${neighborhood}, ${city}`,
-        date: Timestamp.fromDate(roomDateTime), 
+        date: Timestamp.fromDate(roomDateTime),
         time: formattedTime,
         maxParticipants: max,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        createdBy: auth.currentUser?.uid,
-        participants: [auth.currentUser?.uid],
+        createdBy: uid,
+        participants: [uid],
         requests: [],
         isActive: true,
         visibility,
       });
-
-      await setDoc(doc(db, 'rooms', roomRef.id, 'participants', auth.currentUser.uid), {
-        uid: auth.currentUser.uid,
+      batch.set(doc(db, 'rooms', roomRef.id, 'participants', uid), {
+        uid,
         nickname: auth.currentUser.displayName || 'anonymous',
         joinedAt: serverTimestamp(),
+      });
+      await batch.commit();
+
+      await recordMeetupAttendance({
+        roomId: roomRef.id,
+        room: {
+          date: Timestamp.fromDate(roomDateTime),
+          time: formattedTime,
+          barName: barName.trim(),
+        },
+        coParticipantUids: [auth.currentUser?.uid],
       });
 
       router.replace('/(tabs)/feed');
@@ -226,14 +244,14 @@ export default function CreateRoom() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: BeerColors.background }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
         <View style={styles.headerRow}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={28} color={BeerColors.textPrimary} />
+            <Ionicons name="arrow-back" size={28} color={colors.textPrimary} />
           </Pressable>
         </View>
 
@@ -248,7 +266,7 @@ export default function CreateRoom() {
                 name.length > NAME_LIMIT && styles.inputError
               ]}
               placeholder={t('roomNamePlaceholder')}
-              placeholderTextColor={BeerColors.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={name}
               onChangeText={setName}
               maxLength={NAME_LIMIT + 10} 
@@ -269,7 +287,7 @@ export default function CreateRoom() {
                 description.length > DESCRIPTION_LIMIT && styles.inputError
               ]}
               placeholder={t('descriptionPlaceholder')}
-              placeholderTextColor={BeerColors.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={description}
               onChangeText={setDescription}
               multiline={true}
@@ -294,26 +312,34 @@ export default function CreateRoom() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.neighborhoodContainer}
             >
-              {cities.map((cityOption, index) => (
-                <Pressable
-                  key={index}
-                  style={[
-                    styles.neighborhoodButton,
-                    city === cityOption && styles.neighborhoodButtonSelected
-                  ]}
-                  onPress={() => {
-                    setCity(cityOption);
-                    setNeighborhood('');
-                  }}
-                >
-                  <Text style={[
-                    styles.neighborhoodButtonText,
-                    city === cityOption && styles.neighborhoodButtonTextSelected
-                  ]}>
-                    {cityOption}
-                  </Text>
-                </Pressable>
-              ))}
+              {cities.map((cityOption, index) => {
+                const isSelected = city === cityOption;
+                return (
+                  <Pressable
+                    key={index}
+                    style={[
+                      styles.neighborhoodButton,
+                      isSelected && styles.neighborhoodButtonSelected,
+                    ]}
+                    onPress={() => {
+                      setCity(cityOption);
+                      setNeighborhood('');
+                    }}
+                  >
+                    {isSelected ? (
+                      <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+                    ) : null}
+                    <Text
+                      style={[
+                        styles.neighborhoodButtonText,
+                        isSelected && styles.neighborhoodButtonTextSelected,
+                      ]}
+                    >
+                      {cityOption}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </ScrollView>
           </View>
 
@@ -324,23 +350,31 @@ export default function CreateRoom() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.neighborhoodContainer}
             >
-              {neighborhoods.map((hood, index) => (
-                <Pressable
-                  key={index}
-                  style={[
-                    styles.neighborhoodButton,
-                    neighborhood === hood && styles.neighborhoodButtonSelected
-                  ]}
-                  onPress={() => setNeighborhood(hood)}
-                >
-                  <Text style={[
-                    styles.neighborhoodButtonText,
-                    neighborhood === hood && styles.neighborhoodButtonTextSelected
-                  ]}>
-                    {hood}
-                  </Text>
-                </Pressable>
-              ))}
+              {neighborhoods.map((hood, index) => {
+                const isSelected = neighborhood === hood;
+                return (
+                  <Pressable
+                    key={index}
+                    style={[
+                      styles.neighborhoodButton,
+                      isSelected && styles.neighborhoodButtonSelected,
+                    ]}
+                    onPress={() => setNeighborhood(hood)}
+                  >
+                    {isSelected ? (
+                      <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+                    ) : null}
+                    <Text
+                      style={[
+                        styles.neighborhoodButtonText,
+                        isSelected && styles.neighborhoodButtonTextSelected,
+                      ]}
+                    >
+                      {hood}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </ScrollView>
           </View>
 
@@ -352,7 +386,7 @@ export default function CreateRoom() {
                 barName.length > BAR_NAME_LIMIT && styles.inputError
               ]}
               placeholder={t('barPlaceholder')}
-              placeholderTextColor={BeerColors.textMuted}
+              placeholderTextColor={colors.textMuted}
               value={barName}
               onChangeText={setBarName}
               maxLength={BAR_NAME_LIMIT + 10}
@@ -419,7 +453,7 @@ export default function CreateRoom() {
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                 onChange={onTimeChange}
                 {...(Platform.OS === 'ios' && {
-                  textColor: BeerColors.textPrimary,
+                  textColor: colors.textPrimary,
                   themeVariant: 'light',
                 })}
               />
@@ -430,7 +464,7 @@ export default function CreateRoom() {
             <TextInput
               style={styles.input}
               placeholder={t('maxPeoplePlaceholder')}
-              placeholderTextColor={BeerColors.textMuted}
+              placeholderTextColor={colors.textMuted}
               keyboardType="numeric"
               value={maxPeople}
               onChangeText={setMaxPeople}
@@ -489,7 +523,7 @@ export default function CreateRoom() {
               styles.buttonText,
               isDisabled && styles.buttonTextDisabled
             ]}>
-              {isDisabled ? '⏳ ' + t('creatingRoom') : '✨ ' + t('createRoomButton')}
+              {isDisabled ? t('creatingRoom') : t('createRoomButton')}
             </Text>
           </Pressable>
 
@@ -499,7 +533,7 @@ export default function CreateRoom() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   headerRow: {
     paddingHorizontal: 20,
     paddingTop: 10,
@@ -512,7 +546,7 @@ const styles = StyleSheet.create({
     marginLeft: -8,
   },
   container: {
-    backgroundColor: BeerColors.background,
+    backgroundColor: colors.background,
     padding: 24,
     paddingTop: 10,
     flexGrow: 1,
@@ -520,14 +554,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     textAlign: 'center',
     marginBottom: 10,
     letterSpacing: 1,
   },
   subtitle: {
     fontSize: 16,
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: 30,
     fontStyle: 'italic',
@@ -537,12 +571,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   input: {
-    backgroundColor: BeerColors.panel,
-    color: BeerColors.textPrimary,
+    backgroundColor: colors.panel,
+    color: colors.textPrimary,
     padding: 16,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
     fontSize: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -551,33 +585,33 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   inputError: {
-    borderColor: BeerColors.danger,
+    borderColor: colors.danger,
     borderWidth: 3,
   },
   textArea: {
     minHeight: 80,
   },
   characterCount: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 12,
     textAlign: 'right',
     marginTop: 4,
     opacity: 0.7,
   },
   characterCountError: {
-    color: BeerColors.danger,
+    color: colors.danger,
     fontWeight: 'bold',
     opacity: 1,
   },
   sectionTitle: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 12,
     textAlign: 'center',
   },
   fieldLabel: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 8,
@@ -588,26 +622,35 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   neighborhoodButton: {
-    backgroundColor: BeerColors.panel,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.panel,
     borderRadius: 20,
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     borderWidth: 2,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   neighborhoodButtonSelected: {
-    backgroundColor: BeerColors.panelElevated,
-    borderColor: BeerColors.borderSoft,
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.accent,
+    borderWidth: 2,
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
   },
   neighborhoodButtonText: {
-    color: BeerColors.textPrimary,
+    color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '500',
     textTransform: 'capitalize',
   },
   neighborhoodButtonTextSelected: {
-    color: BeerColors.textPrimary,
-    fontWeight: 'bold',
+    color: colors.textPrimary,
+    fontWeight: '700',
   },
   dateContainer: {
     marginBottom: 20,
@@ -617,63 +660,63 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   dayButton: {
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
     minWidth: 70,
   },
   dayButtonSelected: {
-    backgroundColor: BeerColors.panelElevated,
-    borderColor: BeerColors.accent,
+    backgroundColor: colors.panelElevated,
+    borderColor: colors.accent,
     borderWidth: 2,
   },
   todayButton: {
-    borderColor: BeerColors.accent,
+    borderColor: colors.accent,
     borderWidth: 3,
   },
   dayButtonText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
   dayButtonTextSelected: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontWeight: 'bold',
   },
   todayButtonText: {
-    color: BeerColors.accent,
+    color: colors.accent,
     fontWeight: 'bold',
   },
   dateButtonText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 12,
     marginTop: 2,
     opacity: 0.8,
   },
   dateButtonTextSelected: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     opacity: 1,
     fontWeight: '600',
   },
   todayDateText: {
-    color: BeerColors.accent,
+    color: colors.accent,
     opacity: 1,
     fontWeight: '600',
   },
   todayLabel: {
-    color: BeerColors.accent,
+    color: colors.accent,
     fontSize: 10,
     fontWeight: 'bold',
     marginTop: 2,
     textTransform: 'uppercase',
   },
   dateText: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontSize: 16,
   },
   fieldSpacing: {
@@ -689,37 +732,37 @@ const styles = StyleSheet.create({
   },
   visibilityOption: {
     flex: 1,
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 12,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: BeerColors.borderSoft,
+    borderColor: colors.borderSoft,
   },
   visibilityOptionSelected: {
-    borderColor: BeerColors.accent,
-    backgroundColor: BeerColors.panelElevated,
+    borderColor: colors.accent,
+    backgroundColor: colors.panelElevated,
   },
   visibilityOptionText: {
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
   },
   visibilityOptionTextSelected: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
     fontWeight: 'bold',
   },
   visibilityHint: {
-    color: BeerColors.textSecondary,
+    color: colors.textSecondary,
     fontSize: 13,
     textAlign: 'center',
     marginBottom: 8,
     lineHeight: 18,
   },
   button: {
-    backgroundColor: BeerColors.accent,
+    backgroundColor: colors.accent,
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
@@ -732,16 +775,16 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   buttonText: {
-    color: BeerColors.onAccent,
+    color: colors.onAccent,
     fontSize: 18,
     fontWeight: 'bold',
     letterSpacing: 0.5,
   },
   buttonDisabled: {
-    backgroundColor: BeerColors.panel,
+    backgroundColor: colors.panel,
     opacity: 0.7,
   },
   buttonTextDisabled: {
-    color: BeerColors.textPrimary,
+    color: colors.textPrimary,
   },
 });

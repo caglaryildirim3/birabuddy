@@ -1,13 +1,30 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SystemUI from 'expo-system-ui';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { darkTheme, lightTheme } from '../constants/themes';
 
 const THEME_STORAGE_KEY = 'birabuddy_theme_mode';
 
-const ThemeContext = createContext(null);
+export type ThemeColors = typeof lightTheme;
 
-export function ThemeProvider({ children }) {
+export interface ThemeContextValue {
+  isDark: boolean;
+  colors: ThemeColors;
+  ready: boolean;
+  setDarkMode: (value: boolean) => Promise<void>;
+  toggleDarkMode: () => void;
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const [isDark, setIsDark] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -26,7 +43,7 @@ export function ThemeProvider({ children }) {
     SystemUI.setBackgroundColorAsync(colors.background);
   }, [colors.background, ready]);
 
-  const setDarkMode = async (value) => {
+  const setDarkMode = async (value: boolean) => {
     setIsDark(value);
     await AsyncStorage.setItem(THEME_STORAGE_KEY, value ? 'dark' : 'light');
   };
@@ -48,7 +65,7 @@ export function ThemeProvider({ children }) {
   );
 }
 
-export function useTheme() {
+export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);
   if (!ctx) {
     throw new Error('useTheme must be used within ThemeProvider');

@@ -1,5 +1,6 @@
 import { doc, setDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
+import { clearLivePresence, syncLivePresence } from './livePresenceUtils';
 
 export const OUT_TONIGHT_NOTE_LIMIT = 60;
 
@@ -57,11 +58,16 @@ export async function setOutTonightStatus(uid, note = null, fuzzedLocation = nul
       outTonightNote: trimmedNote,
       outTonightSince: Timestamp.fromDate(now),
       outTonightExpiresAt: Timestamp.fromDate(expires),
-      liveLocation: fuzzedLocation ?? null,
-      liveLocationShared: fuzzedLocation != null,
+      liveLocation: null,
+      liveLocationShared: false,
     },
     { merge: true }
   );
+
+  await syncLivePresence(uid, {
+    liveLocation: fuzzedLocation,
+    outTonightExpiresAt: Timestamp.fromDate(expires),
+  });
 }
 
 export async function updateOutTonightNote(uid, note) {
@@ -90,6 +96,7 @@ export async function clearOutTonightStatus(uid) {
     },
     { merge: true }
   );
+  await clearLivePresence(uid);
 }
 
 export function truncateName(name, max = 8) {

@@ -8,14 +8,13 @@ export const DRINKS = [
       'Craft beer',
       'Wheat beer',
       'Mexican beer',
-      'Efes',
-      'Bomonti',
+      'Gluten-free beer',
       'Dark beer',
     ],
   },
   {
     category: 'Shots',
-    emoji: '🥃',
+    emoji: '🫗',
     types: [
       'Vodka',
       'Tequila',
@@ -30,7 +29,7 @@ export const DRINKS = [
   },
   {
     category: 'Cocktails',
-    emoji: '🍹',
+    emoji: '🍸',
     types: [
       'Mojito',
       'Margarita',
@@ -47,6 +46,7 @@ export const DRINKS = [
       'Moscow Mule',
       'Pina Colada',
       'Sex on the Beach',
+      'Sorrel',
     ],
   },
   {
@@ -65,6 +65,7 @@ export const DRINKS = [
       'Sparkling wine',
       'Natural wine',
       'Champagne',
+      'Mulled wine',
     ],
   },
   {
