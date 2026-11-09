@@ -25,6 +25,11 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*-debug.log
+
+# Accidental Expo native project inside Cloud Functions (also in functions/.gcloudignore)
+functions/ios/
+functions/app.json
 
 # macOS
 .DS_Store
@@ -32,6 +37,8 @@ yarn-error.*
 
 # local env files
 .env*.local
+secrets/
+*serviceAccount*.json
 
 # typescript
 *.tsbuildinfo

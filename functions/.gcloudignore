@@ -1,0 +1,11 @@
+# Firebase Cloud Functions upload ignore
+.git
+.gitignore
+.expo
+ios
+android
+node_modules
+*.local
+firebase-debug.log
+firebase-debug.*.log
+app.json

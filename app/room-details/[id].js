@@ -1,5 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import {
+  IconCalendar,
+  IconClock,
+  IconMapPin,
+  IconMessageCircle,
+  IconSchool,
+} from '@tabler/icons-react-native';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   addDoc,
   arrayRemove,
@@ -14,8 +22,10 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
   Alert,
@@ -25,7 +35,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -33,12 +42,73 @@ import {
   TouchableWithoutFeedback,
   View
 } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import PressableUserAvatar from '../../components/PressableUserAvatar';
+import ReactionListModal from '../../components/ReactionListModal';
 import UserProfile from '../../components/UserProfile';
+import { isOutTonight } from '../../utils/outTonightUtils';
 import { auth, db } from '../../firebase/firebaseConfig';
+import { recordMeetupAttendance } from '../../utils/meetupAttendanceUtils';
 import { useButtonDelay } from '../../hooks/useButtonDelay';
+import { useChatAutoScroll } from '../../hooks/useChatAutoScroll';
+import { useScrollToChatMessage } from '../../hooks/useScrollToChatMessage';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
+import { useTheme } from '../../contexts/ThemeContext';
+import { getUserDisplayName } from '../../utils/authUtils';
+import { getFriendIds } from '../../utils/friendUtils';
+import { parseRoomDateTime } from '../../utils/dateUtils';
+import {
+  getRoomChatReadTimestamp,
+  loadRoomChatLastReadAt,
+  saveRoomChatLastReadAt,
+} from '../../utils/roomChatReadUtils';
+import { toggleRoomMessageLike, findMatchingRoomMessageId } from '../../utils/roomChatUtils';
+import { buildInviteFriendEntry, markRoomInviteSeen } from '../../utils/roomInviteUtils';
+import { deleteRoomTree } from '../../utils/roomDeleteUtils';
+import {
+  deleteJoinRequestNotifications,
+  markRoomMessageNotificationsRead,
+  markRoomNotificationsRead,
+  notifyJoinRequestApproved,
+} from '../../utils/roomNotificationUtils';
+import {
+  canRequestJoinRoom,
+  canViewRoom,
+  getRoomDisplayLocation,
+  isRoomExpired,
+} from '../../utils/roomUtils';
+
+const INVALID_PARTICIPANT_UIDS = new Set(['undefined', 'anonymous', 'null']);
+const DOUBLE_TAP_MS = 300;
+
+function isValidParticipantUid(uid) {
+  return (
+    typeof uid === 'string' &&
+    uid.length >= 10 &&
+    !INVALID_PARTICIPANT_UIDS.has(uid)
+  );
+}
+
+function resolveParticipantNickname(userData, participantData, t) {
+  let nickname = getUserDisplayName(userData, userData?.email);
+  if (!nickname || nickname === 'User') {
+    nickname = participantData?.nickname?.trim() || '';
+  }
+  if (!nickname || nickname === 'anonymous') {
+    nickname = userData?.instagram?.trim() || t('unknownUser');
+  }
+  return nickname;
+}
 
 export default function RoomDetails() {
-  const { id } = useLocalSearchParams();
+  const { t } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const params = useLocalSearchParams();
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const openChatParam = Array.isArray(params.openChat) ? params.openChat[0] : params.openChat;
+  const initialScrollToMessageId = Array.isArray(params.messageId) ? params.messageId[0] : params.messageId;
   const router = useRouter();
 
   const [room, setRoom] = useState(null);
@@ -49,14 +119,57 @@ export default function RoomDetails() {
   const [hasRequestedJoin, setHasRequestedJoin] = useState(false);
   const [selectedUserProfile, setSelectedUserProfile] = useState(null);
   const [showUserProfile, setShowUserProfile] = useState(false);
-  const [reportModalVisible, setReportModalVisible] = useState(false);
-  const [reportedUser, setReportedUser] = useState(null);
-  const [reportReason, setReportReason] = useState('');
+  const [friendIds, setFriendIds] = useState([]);
+  const [inviteFriends, setInviteFriends] = useState([]);
+  const [invitingId, setInvitingId] = useState(null);
 
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [showChat, setShowChat] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [likesModalUserIds, setLikesModalUserIds] = useState(null);
+  const [lastReadAt, setLastReadAt] = useState(0);
+  const [pendingScrollTargetId, setPendingScrollTargetId] = useState(initialScrollToMessageId || null);
   const flatListRef = useRef(null);
+  const swipeableRefs = useRef({});
+  const lastTapRef = useRef({});
+  const hasScrolledToTargetRef = useRef(false);
+  const expiredAlertShownRef = useRef(false);
+  const handleTargetScrolled = useCallback(() => {
+    hasScrolledToTargetRef.current = true;
+    setPendingScrollTargetId(null);
+  }, []);
+  const messagePreviewParam = Array.isArray(params.messagePreview)
+    ? params.messagePreview[0]
+    : params.messagePreview;
+  const messageAtSeconds = Number(Array.isArray(params.at) ? params.at[0] : params.at) || null;
+  const wantsTargetScroll = Boolean(initialScrollToMessageId || messagePreviewParam);
+  const { scrollToEnd, onContentSizeChange: onAutoScrollContentSizeChange, onScrollToIndexFailed: onAutoScrollToIndexFailed } = useChatAutoScroll(
+    flatListRef,
+    messages,
+    {
+      enabled: showChat && !wantsTargetScroll && !pendingScrollTargetId,
+    }
+  );
+  const { scrollToMessage, highlightedMessageId, onScrollToIndexFailed: onTargetScrollToIndexFailed, onTargetContentSizeChange } =
+    useScrollToChatMessage(flatListRef, messages, { onScrolled: handleTargetScrolled });
+
+  const onContentSizeChange = useCallback(() => {
+    onAutoScrollContentSizeChange();
+    onTargetContentSizeChange();
+  }, [onAutoScrollContentSizeChange, onTargetContentSizeChange]);
+
+  const onScrollToIndexFailed = useCallback(
+    (info) => {
+      onTargetScrollToIndexFailed(info);
+      onAutoScrollToIndexFailed(info);
+    },
+    [onAutoScrollToIndexFailed, onTargetScrollToIndexFailed]
+  );
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
+  const chatInputBottomPadding =
+    keyboardHeight > 0 ? keyboardHeight + 8 : Math.max(insets.bottom, 12) + 8;
 
   // Helper: Check if room is full
   const isRoomFull = useMemo(() => {
@@ -65,7 +178,7 @@ export default function RoomDetails() {
   }, [participants, room]);
 
   const formatDateString = (dateVal) => {
-    if (!dateVal) return 'Not specified';
+    if (!dateVal) return t('notSpecified');
     if (dateVal.toDate) {
       return dateVal.toDate().toLocaleDateString('tr-TR', {
         day: '2-digit',
@@ -86,36 +199,118 @@ export default function RoomDetails() {
         return dateVal;
       }
     }
-    return 'Not specified';
+    return t('notSpecified');
   };
 
   const formatTimeString = (timeString) => {
-    if (!timeString || typeof timeString !== 'string') return 'Not specified';
+    if (!timeString || typeof timeString !== 'string') return t('notSpecified');
     return timeString;
   };
 
-  const getDisplayLocation = () => {
-    if (!room) return 'Not specified';
-    if (isParticipant || isCreator) {
-      if (room.barName && room.neighborhood) return `${room.barName}, ${room.neighborhood}`;
-      if (room.fullLocation) return room.fullLocation;
-      return room.location || 'Location details shared';
-    } else {
-      if (room.neighborhood) return `${room.neighborhood} (exact location hidden)`;
-      return 'Location shared after joining';
-    }
-  };
+  const getDisplayLocation = () =>
+    getRoomDisplayLocation(room, {
+      isParticipant: isParticipant || isCreator,
+      viewerUid: auth.currentUser?.uid,
+      t,
+    });
 
   useEffect(() => {
-    if (!id || !isParticipant || !showChat) return;
+    const uid = auth.currentUser?.uid;
+    if (!uid || !id) return undefined;
+
+    loadRoomChatLastReadAt(uid, id).then(setLastReadAt).catch(() => setLastReadAt(0));
+    return undefined;
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || !isParticipant) return;
     const messagesRef = collection(db, 'rooms', id, 'messages');
     const q = query(messagesRef, orderBy('createdAt'));
-    const unsubscribe = onSnapshot(q, snapshot => {
-      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map((messageDoc) => ({ id: messageDoc.id, ...messageDoc.data() }));
       setMessages(msgs);
     });
     return () => unsubscribe();
-  }, [id, isParticipant, showChat]);
+  }, [id, isParticipant]);
+
+  const markChatAsRead = useCallback(async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !id) return;
+
+    const readAt = getRoomChatReadTimestamp(messages, uid);
+    setLastReadAt(readAt);
+    await saveRoomChatLastReadAt(uid, id, readAt);
+    await markRoomMessageNotificationsRead(uid, id).catch(() => {});
+  }, [id, messages]);
+
+  useEffect(() => {
+    if (!showChat) return undefined;
+    markChatAsRead().catch(() => {});
+    return undefined;
+  }, [showChat, markChatAsRead]);
+
+  const closeChat = useCallback(() => {
+    setReplyingTo(null);
+    setLikesModalUserIds(null);
+    markChatAsRead()
+      .catch(() => {})
+      .finally(() => setShowChat(false));
+  }, [markChatAsRead]);
+
+  const prevShowChatRef = useRef(false);
+  useEffect(() => {
+    if (openChatParam === '1' && isParticipant) {
+      setShowChat(true);
+    }
+  }, [openChatParam, isParticipant]);
+
+  useEffect(() => {
+    setPendingScrollTargetId(initialScrollToMessageId || null);
+    hasScrolledToTargetRef.current = false;
+  }, [initialScrollToMessageId, id]);
+
+  useEffect(() => {
+    if (!showChat || !wantsTargetScroll || messages.length === 0 || hasScrolledToTargetRef.current) {
+      return;
+    }
+
+    const targetId = findMatchingRoomMessageId(messages, {
+      chatMessageId: pendingScrollTargetId || initialScrollToMessageId,
+      message: messagePreviewParam,
+      createdAt: messageAtSeconds ? { seconds: messageAtSeconds } : null,
+    });
+
+    if (!targetId) return;
+
+    requestAnimationFrame(() => {
+      scrollToMessage(targetId);
+    });
+  }, [
+    showChat,
+    wantsTargetScroll,
+    messages,
+    pendingScrollTargetId,
+    initialScrollToMessageId,
+    messagePreviewParam,
+    messageAtSeconds,
+    scrollToMessage,
+  ]);
+
+  useEffect(() => {
+    if (showChat && !prevShowChatRef.current && messages.length > 0 && !wantsTargetScroll) {
+      scrollToEnd(false);
+    }
+    prevShowChatRef.current = showChat;
+  }, [showChat, messages.length, scrollToEnd, wantsTargetScroll]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !id) return undefined;
+      markRoomNotificationsRead(uid, id).catch(() => {});
+      return undefined;
+    }, [id])
+  );
 
   const handleSend = async () => {
     if (message.trim() === '') return;
@@ -123,54 +318,53 @@ export default function RoomDetails() {
       const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
       const userData = userDoc.exists() ? userDoc.data() : {};
       const nickname = userData.instagram || userData.nickname || 'unknown';
+      const trimmed = message.trim();
       
       const messagesRef = collection(db, 'rooms', id, 'messages');
-      await addDoc(messagesRef, {
-        text: message,
+      const msgData = {
+        text: trimmed,
         sender: nickname,
         uid: auth.currentUser.uid,
         createdAt: serverTimestamp(),
-      });
+        likes: [],
+      };
+      if (replyingTo) {
+        msgData.replyTo = {
+          id: replyingTo.id,
+          text: replyingTo.text,
+          senderLabel: replyingTo.senderLabel,
+        };
+      }
+      const messageRef = await addDoc(messagesRef, msgData);
 
       // Send Notification to others
-      const recipients = participants.filter(p => p.uid !== auth.currentUser.uid);
-      recipients.forEach(async (p) => {
-          await addDoc(collection(db, 'notifications'), {
+      const recipients = participants.filter((p) => p.uid !== auth.currentUser.uid);
+      await Promise.all(
+        recipients.map((p) =>
+          addDoc(collection(db, 'notifications'), {
             userId: p.uid,
             type: 'message',
             title: `New message in ${room?.name || 'Chat'}`,
-            message: message,
+            message: trimmed,
             roomId: id,
+            chatMessageId: messageRef.id,
             createdAt: serverTimestamp(),
             read: false,
-            senderId: auth.currentUser.uid
-          });
-      });
+            senderId: auth.currentUser.uid,
+          })
+        )
+      );
 
       setMessage('');
-      flatListRef.current?.scrollToEnd({ animated: true });
+      setReplyingTo(null);
+      scrollToEnd(true);
     } catch (error) {
-      Alert.alert('Error', 'Failed to send message');
+      Alert.alert(t('error'), t('failedToSendMessage'));
     }
   };
 
   const handleSendPress = () => {
     executeWithDelay(() => handleSend());
-  };
-
-  const renderChatMessage = ({ item }) => {
-    const isMe = item.uid === auth.currentUser.uid;
-    return (
-      <View style={[styles.messageContainer, isMe ? styles.myMessage : styles.otherMessage]}>
-        <View style={[styles.messageBubble, isMe ? styles.myMessageBubble : styles.otherMessageBubble]}>
-          {!isMe && <Text style={styles.senderName}>{item.sender}</Text>}
-          <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>{item.text}</Text>
-          <Text style={[styles.timestamp, isMe ? styles.myTimestamp : styles.otherTimestamp]}>
-            {item.createdAt?.toDate?.().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || ''}
-          </Text>
-        </View>
-      </View>
-    );
   };
 
   const checkParticipationStatus = (participantsList, requestsList) => {
@@ -191,56 +385,325 @@ export default function RoomDetails() {
     return auth.currentUser.uid === room.createdBy;
   }, [auth.currentUser?.uid, room?.createdBy]);
 
+  const canAccessRoom = useMemo(() => {
+    if (!room || !auth.currentUser?.uid) return false;
+    return canViewRoom(room, auth.currentUser.uid, friendIds);
+  }, [room, friendIds, auth.currentUser?.uid]);
+
+  const canJoinRoom = useMemo(() => {
+    if (!room || !auth.currentUser?.uid) return false;
+    return canRequestJoinRoom(room, auth.currentUser.uid, friendIds);
+  }, [room, friendIds, auth.currentUser?.uid]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      setFriendIds([]);
+      return;
+    }
+    getFriendIds(uid).then(setFriendIds).catch(() => setFriendIds([]));
+  }, [auth.currentUser?.uid]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!isParticipant || !uid || friendIds.length === 0) {
+      setInviteFriends([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadInviteFriends = async () => {
+      const eligibleIds = friendIds.filter(
+        (friendUid) =>
+          friendUid !== uid &&
+          !participantIdSet.has(friendUid) &&
+          !requestIdSet.has(friendUid)
+      );
+
+      const friends = [];
+      for (const friendUid of eligibleIds) {
+        try {
+          const userSnap = await getDoc(doc(db, 'users', friendUid));
+          if (!userSnap.exists()) continue;
+          friends.push(
+            buildInviteFriendEntry(userSnap.data(), friendUid, {
+              invited: invitedIdSet.has(friendUid),
+              fallbackName: t('friendTagLabel'),
+            })
+          );
+        } catch (e) {
+          // skip failed profile fetch
+        }
+      }
+
+      if (!cancelled) {
+        friends.sort((a, b) => a.nickname.localeCompare(b.nickname));
+        setInviteFriends(friends);
+      }
+    };
+
+    loadInviteFriends();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isParticipant,
+    friendIds,
+    participantIdSet,
+    requestIdSet,
+    invitedIdSet,
+    auth.currentUser?.uid,
+  ]);
+
   const formattedDate = useMemo(() => formatDateString(room?.date), [room?.date]);
   const formattedTime = useMemo(() => formatTimeString(room?.time), [room?.time]);
 
+  const capacityFill = useMemo(() => {
+    const max = room?.maxParticipants || 0;
+    if (!max) return 0;
+    return Math.min(participants.length / max, 1);
+  }, [participants.length, room?.maxParticipants]);
+
+  const hasUnreadMessages = useMemo(() => {
+    if (!isParticipant || showChat) return false;
+    const currentUid = auth.currentUser?.uid;
+    return messages.some((msg) => {
+      if (msg.uid === currentUid) return false;
+      const msgTime = msg.createdAt?.toDate?.()?.getTime?.() || 0;
+      return msgTime > lastReadAt;
+    });
+  }, [messages, lastReadAt, isParticipant, showChat]);
+
+  const friendIdSet = useMemo(() => new Set(friendIds), [friendIds]);
+  const participantIdSet = useMemo(
+    () => new Set(participants.map((p) => p.uid)),
+    [participants]
+  );
+  const requestIdSet = useMemo(
+    () => new Set(joinRequests.map((r) => r.uid)),
+    [joinRequests]
+  );
+  const invitedIdSet = useMemo(() => new Set(room?.invites || []), [room?.invites]);
+
   const handleUserProfileClick = useCallback((uid) => {
-    if (uid === auth.currentUser?.uid) return;
+    if (!uid) return;
     setSelectedUserProfile(uid);
     setShowUserProfile(true);
-  }, [auth.currentUser?.uid]);
+  }, []);
 
   const closeUserProfile = useCallback(() => {
     setShowUserProfile(false);
     setSelectedUserProfile(null);
   }, []);
 
+  const chatUserSnapshots = useMemo(() => {
+    const snapshots = {};
+    participants.forEach((participant) => {
+      snapshots[participant.uid] = {
+        name: participant.nickname,
+        photoURL: participant.photoURL || null,
+      };
+    });
+    return snapshots;
+  }, [participants]);
+
+  const participantUidBySender = useMemo(() => {
+    const map = {};
+    participants.forEach((participant) => {
+      if (participant.nickname) {
+        map[participant.nickname] = participant.uid;
+      }
+    });
+    return map;
+  }, [participants]);
+
+  const resolveMessageUid = useCallback(
+    (item) => item.uid || participantUidBySender[item.sender] || null,
+    [participantUidBySender]
+  );
+
+  const getMessageSenderLabel = useCallback(
+    (item) => {
+      const messageUid = resolveMessageUid(item);
+      if (messageUid && chatUserSnapshots[messageUid]) {
+        return chatUserSnapshots[messageUid].name;
+      }
+      return item.sender || t('unknownUser');
+    },
+    [resolveMessageUid, chatUserSnapshots, t]
+  );
+
+  const handleToggleMessageLike = async (item) => {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid || !id || !item.id) return;
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      await toggleRoomMessageLike(id, item.id, currentUid);
+    } catch {}
+  };
+
+  const handleDoubleTapMessage = (item) => {
+    const now = Date.now();
+    const last = lastTapRef.current[item.id] || 0;
+    if (now - last < DOUBLE_TAP_MS) {
+      handleToggleMessageLike(item);
+    }
+    lastTapRef.current[item.id] = now;
+  };
+
+  const handleSwipeReply = (item) => {
+    if (process.env.EXPO_OS === 'ios') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setReplyingTo({
+      id: item.id,
+      text: item.text,
+      senderLabel: getMessageSenderLabel(item),
+    });
+    swipeableRefs.current[item.id]?.close();
+  };
+
+  const renderSwipeAction = () => (
+    <View style={styles.swipeReplyContainer}>
+      <Ionicons name="return-up-forward-outline" size={22} color={colors.accent} />
+    </View>
+  );
+
+  const renderChatMessage = ({ item }) => {
+    const messageUid = resolveMessageUid(item);
+    const isMe = messageUid === auth.currentUser?.uid;
+    const snapshot = (messageUid && chatUserSnapshots[messageUid]) || {
+      name: item.sender || 'User',
+      photoURL: null,
+    };
+    const likes = Array.isArray(item.likes) ? item.likes : [];
+    const likeCount = likes.length;
+
+    const bubble = (
+      <View
+        style={[
+          styles.bubblePressable,
+          likeCount > 0 && styles.bubblePressableWithLike,
+          isMe ? styles.bubblePressableMe : styles.bubblePressableOther,
+        ]}
+      >
+        <Pressable onPress={() => handleDoubleTapMessage(item)}>
+          <View
+            style={[
+              styles.messageBubble,
+              isMe ? styles.myMessageBubble : styles.otherMessageBubble,
+              isMe ? styles.bubbleAlignEnd : styles.bubbleAlignStart,
+            ]}
+          >
+            {!isMe ? <Text style={styles.senderName}>{getMessageSenderLabel(item)}</Text> : null}
+
+            {item.replyTo ? (
+              <Pressable
+                style={[styles.replyQuote, isMe ? styles.replyQuoteMe : styles.replyQuoteOther]}
+                onPress={() => scrollToMessage(item.replyTo.id)}
+              >
+                <Text style={styles.replyQuoteName} numberOfLines={1}>{item.replyTo.senderLabel}</Text>
+                <Text style={styles.replyQuoteText} numberOfLines={2}>{item.replyTo.text}</Text>
+              </Pressable>
+            ) : null}
+
+            <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
+              {item.text}
+            </Text>
+            <Text style={[styles.timestamp, isMe ? styles.myTimestamp : styles.otherTimestamp]}>
+              {item.createdAt?.toDate?.().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || ''}
+            </Text>
+          </View>
+        </Pressable>
+
+        {likeCount > 0 ? (
+          <Pressable
+            style={[styles.likeBadge, isMe ? styles.likeBadgeMe : styles.likeBadgeOther]}
+            onPress={() => setLikesModalUserIds(likes)}
+          >
+            <Text style={styles.likeBadgeEmoji}>❤️</Text>
+            {likeCount > 1 ? (
+              <Text style={styles.likeBadgeCount}>x{likeCount}</Text>
+            ) : null}
+          </Pressable>
+        ) : null}
+      </View>
+    );
+
+    const avatar = (
+      <PressableUserAvatar
+        uid={messageUid}
+        snapshot={snapshot}
+        size={32}
+        onPress={messageUid ? handleUserProfileClick : undefined}
+        style={styles.chatMessageAvatar}
+      />
+    );
+
+    return (
+      <View
+        style={[
+          styles.messageRowOuter,
+          isMe ? styles.messageRowOuterMe : null,
+          item.id === highlightedMessageId ? styles.messageRowOuterHighlighted : null,
+        ]}
+      >
+        <Swipeable
+          ref={(ref) => { swipeableRefs.current[item.id] = ref; }}
+          containerStyle={styles.swipeableContainer}
+          childrenContainerStyle={styles.swipeableChildContainer}
+          friction={2}
+          overshootLeft={false}
+          overshootRight={false}
+          renderLeftActions={renderSwipeAction}
+          onSwipeableOpen={() => handleSwipeReply(item)}
+          leftThreshold={60}
+          rightThreshold={9999}
+        >
+          <View style={[styles.messageRow, isMe ? styles.messageRowMe : styles.messageRowOther]}>
+            {!isMe ? avatar : null}
+            {bubble}
+            {isMe ? avatar : null}
+          </View>
+        </Swipeable>
+      </View>
+    );
+  };
+
   useEffect(() => {
     if (!id) return;
+    expiredAlertShownRef.current = false;
     const roomRef = doc(db, 'rooms', id);
     const unsubscribeRoom = onSnapshot(roomRef, async (docSnap) => {
       if (!docSnap.exists()) {
-        Alert.alert('Room Not Found', 'This room no longer exists.', [
-          { text: 'OK', onPress: () => router.replace('/my-rooms') }
-        ]);
+        if (!expiredAlertShownRef.current) {
+          expiredAlertShownRef.current = true;
+          Alert.alert(t('roomNotFound'), t('roomNotFoundMessage'), [
+            { text: t('ok'), onPress: () => router.replace('/(tabs)/feed') },
+          ]);
+        }
         return;
       }
-      
+
       const roomData = docSnap.data();
 
-      // Check Expiration
       const now = new Date();
       const { date, time } = roomData;
       if (date) {
-         let startDateTime;
-         if (date.toDate) {
-             startDateTime = date.toDate();
-         } else if (typeof date === 'string' && time) {
-             startDateTime = new Date(`${date}T${time}`);
-         }
-         
-         if (startDateTime) {
-             const expiry = new Date(startDateTime.getTime() + 24 * 60 * 60 * 1000);
-             if (expiry < now) {
-                 Alert.alert('Room Expired', 'This meetup has ended.', [
-                     { text: 'OK', onPress: () => router.replace('/my-rooms') }
-                 ]);
-                 if (roomData.createdBy === auth.currentUser?.uid) {
-                     deleteDoc(roomRef).catch(err => console.log('Auto-delete failed', err));
-                 }
-                 return; 
-             }
-         }
+        const startDateTime = parseRoomDateTime(date, time);
+
+        if (startDateTime && isRoomExpired(date, time, now)) {
+          if (!expiredAlertShownRef.current) {
+            expiredAlertShownRef.current = true;
+            Alert.alert(t('roomExpired'), t('roomExpiredMessage'), [
+              { text: t('ok'), onPress: () => router.replace('/(tabs)/feed') },
+            ]);
+          }
+          if (roomData.createdBy === auth.currentUser?.uid) {
+            deleteRoomTree(id).catch((err) => console.log('Auto-delete failed', err));
+          }
+          return;
+        }
       }
 
       setRoom(roomData);
@@ -254,9 +717,14 @@ export default function RoomDetails() {
              if (!uid) continue;
              try {
                 const userSnap = await getDoc(doc(db, 'users', uid));
-                const nickname = userSnap.exists() ? (userSnap.data().instagram || userSnap.data().nickname) : `User-${uid.substr(0,5)}`;
-                const major = userSnap.exists() ? userSnap.data().major : 'Unknown';
-                requests.push({ uid, nickname, major });
+                const userData = userSnap.exists() ? userSnap.data() : {};
+                const nickname = userSnap.exists()
+                  ? getUserDisplayName(userData)
+                  : `User-${uid.substr(0, 5)}`;
+                const major = userSnap.exists() ? userData.major : t('unknown');
+                const photoURL =
+                  Array.isArray(userData.photos) && userData.photos[0] ? userData.photos[0] : null;
+                requests.push({ uid, nickname, major, photoURL });
              } catch (e) {}
           }
           setJoinRequests(requests);
@@ -266,55 +734,158 @@ export default function RoomDetails() {
       }
     });
 
-    let unsubscribeParticipants;
-    if (auth.currentUser?.uid) {
-      const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
-      unsubscribeParticipants = onSnapshot(participantsCollectionRef, async (snapshot) => {
-        try {
-          const list = await Promise.all(snapshot.docs.map(async (docSnap) => {
-            const data = docSnap.data();
-            if (!data.uid) return null;
-            try {
-              const userDoc = await getDoc(doc(db, 'users', data.uid));
-              const userData = userDoc.exists() ? userDoc.data() : {};
-              const nickname = userData.instagram || userData.nickname || `User-${data.uid.substr(0,5)}`;
-              const major = userData.major || 'Not specified';
-              return { uid: data.uid, nickname, major };
-            } catch (e) { return { uid: data.uid, nickname: 'Unknown User', major: '' }; }
-          }));
-          setParticipants(list.filter(p => p !== null));
-        } catch (e) {}
-      });
-    }
-
     return () => {
       unsubscribeRoom();
-      if (unsubscribeParticipants) unsubscribeParticipants();
     };
   }, [id]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!id || !uid || !room) return undefined;
+    if (!canViewRoom(room, uid, friendIds)) return undefined;
+
+    const participantsCollectionRef = collection(db, 'rooms', id, 'participants');
+    const unsubscribeParticipants = onSnapshot(
+      participantsCollectionRef,
+      async (snapshot) => {
+        try {
+          const seenUids = new Set();
+          const list = [];
+
+          for (const docSnap of snapshot.docs) {
+            const participantUid = docSnap.id;
+            if (!isValidParticipantUid(participantUid) || seenUids.has(participantUid)) {
+              continue;
+            }
+            seenUids.add(participantUid);
+
+            const data = docSnap.data();
+            try {
+              const userDoc = await getDoc(doc(db, 'users', participantUid));
+              const userData = userDoc.exists() ? userDoc.data() : {};
+              list.push({
+                uid: participantUid,
+                nickname: resolveParticipantNickname(userData, data, t),
+                major: userData.major || t('notSpecified'),
+                photoURL:
+                  Array.isArray(userData.photos) && userData.photos[0] ? userData.photos[0] : null,
+                isOutTonight: isOutTonight(userData),
+              });
+            } catch {
+              list.push({
+                uid: participantUid,
+                nickname: resolveParticipantNickname({}, data, t),
+                major: '',
+                photoURL: null,
+                isOutTonight: false,
+              });
+            }
+          }
+
+          const hostUid = room?.createdBy;
+          if (isValidParticipantUid(hostUid) && !seenUids.has(hostUid)) {
+            try {
+              const hostDoc = await getDoc(doc(db, 'users', hostUid));
+              const hostData = hostDoc.exists() ? hostDoc.data() : {};
+              list.unshift({
+                uid: hostUid,
+                nickname: resolveParticipantNickname(hostData, {}, t),
+                major: hostData.major || t('notSpecified'),
+                photoURL:
+                  Array.isArray(hostData.photos) && hostData.photos[0] ? hostData.photos[0] : null,
+                isOutTonight: isOutTonight(hostData),
+              });
+            } catch {
+              // host profile unavailable — skip synthetic entry
+            }
+          }
+
+          setParticipants(list);
+        } catch (e) {
+          console.error('Error processing participants:', e);
+        }
+      },
+      (error) => {
+        console.error('Error loading participants:', error);
+      }
+    );
+
+    return () => unsubscribeParticipants();
+  }, [id, room, friendIds, t]);
 
   useEffect(() => {
     checkParticipationStatus(participants, joinRequests);
   }, [participants, joinRequests]);
 
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!id || !uid || !room || participants.length === 0) return undefined;
+
+    const isParticipant = participants.some((participant) => participant.uid === uid);
+    if (!isParticipant) return undefined;
+
+    recordMeetupAttendance({
+      roomId: id,
+      room,
+      coParticipantUids: participants.map((participant) => participant.uid),
+    }).catch(() => {});
+
+    return undefined;
+  }, [id, room, participants]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!id || !uid || !room?.invites?.includes(uid)) return;
+    markRoomInviteSeen(uid, id).catch(() => {});
+  }, [id, room?.invites]);
+
+  const handleLeaveRoom = () => {
+    Alert.alert(
+      t('leaveRoom'),
+      t('leaveRoomConfirm', { roomName: room?.name || t('roomFallback') }),
+      [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('leave'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const uid = auth.currentUser?.uid;
+              if (!uid || !id) return;
+
+              await deleteDoc(doc(db, 'rooms', id, 'participants', uid));
+              await updateDoc(doc(db, 'rooms', id), {
+                participants: arrayRemove(uid),
+              });
+              router.back();
+            } catch (e) {
+              Alert.alert(t('error'), t('failedToLeaveRoom'));
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleKickParticipant = async (participant) => {
-    Alert.alert('Kick Participant', `Remove ${participant.nickname}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
+    Alert.alert(t('kickParticipant'), t('kickParticipantConfirm', { name: participant.nickname }), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('removeParticipant'), style: 'destructive', onPress: async () => {
           try {
             await deleteDoc(doc(db, 'rooms', id, 'participants', participant.uid));
             const roomRef = doc(db, 'rooms', id);
             await updateDoc(roomRef, {
                 participants: arrayRemove(participant.uid)
             });
-          } catch (e) { Alert.alert('Error', 'Failed to remove participant'); }
+          } catch (e) { Alert.alert(t('error'), t('failedToRemoveParticipant')); }
         }
       }
     ]);
   };
 
   const handleRequestJoin = async () => {
-    if (!auth.currentUser) return Alert.alert('Error', 'Login required');
+    if (!auth.currentUser) return Alert.alert(t('error'), t('loginRequired'));
+    if (!canJoinRoom) return;
     try {
       const roomRef = doc(db, 'rooms', id);
       await updateDoc(roomRef, {
@@ -335,59 +906,34 @@ export default function RoomDetails() {
           });
       }
 
-      Alert.alert('Success', 'Request sent!');
-    } catch (e) { Alert.alert('Error', 'Failed to send request'); }
+    } catch (e) { Alert.alert(t('error'), t('failedToSendJoinRequest')); }
   };
 
   const handleCancelRequest = async () => {
     if (!auth.currentUser) return;
-    Alert.alert('Cancel Request', 'Cancel your join request?', [
-      { text: 'No', style: 'cancel' },
-      { text: 'Yes', style: 'destructive', onPress: async () => {
+    Alert.alert(t('cancelJoinRequest'), t('cancelJoinRequestConfirm'), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('yes'), style: 'destructive', onPress: async () => {
           try {
             const roomRef = doc(db, 'rooms', id);
             await updateDoc(roomRef, {
               requests: arrayRemove(auth.currentUser.uid),
               [`requestTimestamps.${auth.currentUser.uid}`]: null,
             });
-          } catch (e) { Alert.alert('Error', 'Failed to cancel'); }
+          } catch (e) { Alert.alert(t('error'), t('failedToCancelRequest')); }
         }
       }
     ]);
   };
 
-  const handleReportUser = (participant) => {
-    setReportedUser(participant);
-    setReportModalVisible(true);
-  };
-
-  const submitReport = async () => {
-    if (!reportReason.trim()) return Alert.alert('Error', 'Please provide a reason');
-    try {
-      await addDoc(collection(db, 'reports'), {
-        reportedUserId: reportedUser.uid,
-        reportedUserNickname: reportedUser.nickname,
-        reporterUserId: auth.currentUser.uid,
-        roomId: id,
-        reason: reportReason,
-        createdAt: serverTimestamp(),
-        status: 'pending'
-      });
-      Alert.alert('Report Submitted', 'Thank you.');
-      setReportModalVisible(false);
-      setReportedUser(null);
-      setReportReason('');
-    } catch (e) { Alert.alert('Error', 'Failed to submit report'); }
-  };
-
   const handleDeleteRoom = async () => {
-    Alert.alert('Delete Room', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
+    Alert.alert(t('deleteRoom'), t('deleteRoomConfirm'), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('delete'), style: 'destructive', onPress: async () => {
           try {
-            await deleteDoc(doc(db, 'rooms', id));
-            router.replace('/my-rooms');
-          } catch (e) { Alert.alert('Error', 'Failed to delete room'); }
+            await deleteRoomTree(id);
+            router.replace('/(tabs)/feed');
+          } catch (e) { Alert.alert(t('error'), t('failedToDeleteRoom')); }
         }
       }
     ]);
@@ -396,7 +942,7 @@ export default function RoomDetails() {
   const handleApprove = async (requestUser) => {
     if (requestUser.uid === auth.currentUser?.uid) return;
     if (participants.length >= (room.maxParticipants || 0)) {
-        Alert.alert('Room Full', 'This room has reached its capacity.');
+        Alert.alert(t('roomFullTitle'), t('roomFullMessage'));
         return;
     }
 
@@ -404,37 +950,179 @@ export default function RoomDetails() {
     const participantDocRef = doc(db, 'rooms', id, 'participants', requestUser.uid);
     
     try {
-      await setDoc(participantDocRef, { 
-          uid: requestUser.uid, 
-          nickname: requestUser.nickname, 
-          joinedAt: serverTimestamp() 
+      const batch = writeBatch(db);
+      batch.set(participantDocRef, {
+        uid: requestUser.uid,
+        nickname: requestUser.nickname,
+        joinedAt: serverTimestamp(),
       });
-
-      await updateDoc(roomRef, { 
-          requests: arrayRemove(requestUser.uid),
-          participants: arrayUnion(requestUser.uid) 
+      batch.update(roomRef, {
+        requests: arrayRemove(requestUser.uid),
+        participants: arrayUnion(requestUser.uid),
       });
+      await batch.commit();
 
-    } catch (e) { Alert.alert('Error', 'Failed to approve'); }
+      const hostSnap = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const hostName = hostSnap.exists()
+        ? getUserDisplayName(hostSnap.data()) || t('aFriend')
+        : t('aFriend');
+      await notifyJoinRequestApproved({
+        roomId: id,
+        hostUid: auth.currentUser.uid,
+        hostName,
+        requesterUid: requestUser.uid,
+        roomName: room?.name || t('aRoom'),
+        title: t('notificationRoomApproved'),
+        message: t('notificationRoomApprovedMessage', {
+          hostName,
+          roomName: room?.name || t('aRoom'),
+        }),
+      }).catch(() => {});
+
+      await deleteJoinRequestNotifications(auth.currentUser?.uid, id, requestUser.uid).catch(() => {});
+    } catch (e) { Alert.alert(t('error'), t('failedToApproveRequest')); }
   };
 
   const handleDecline = async (requestUser) => {
     const roomRef = doc(db, 'rooms', id);
     try {
-      if (room && room.requests) await updateDoc(roomRef, { requests: arrayRemove(requestUser.uid) });
-    } catch (e) { Alert.alert('Error', 'Failed to decline'); }
+      if (room && room.requests) {
+        await updateDoc(roomRef, { requests: arrayRemove(requestUser.uid) });
+      }
+      await deleteJoinRequestNotifications(auth.currentUser?.uid, id, requestUser.uid).catch(() => {});
+    } catch (e) { Alert.alert(t('error'), t('failedToDeclineRequest')); }
+  };
+
+  const handleInviteFriend = async (friend) => {
+    if (!auth.currentUser || friend.invited || invitingId || isRoomFull) return;
+
+    setInvitingId(friend.uid);
+    try {
+      const userSnap = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const inviterName = userSnap.exists()
+        ? getUserDisplayName(userSnap.data()) || t('aFriend')
+        : t('aFriend');
+
+      const roomRef = doc(db, 'rooms', id);
+      await updateDoc(roomRef, {
+        invites: arrayUnion(friend.uid),
+        [`inviteMeta.${friend.uid}`]: {
+          senderId: auth.currentUser.uid,
+          senderName: inviterName,
+          invitedAt: serverTimestamp(),
+        },
+      });
+
+      await addDoc(collection(db, 'notifications'), {
+        userId: friend.uid,
+        type: 'invite',
+        title: 'Room Invite',
+        message: `${inviterName} invited you to join "${room?.name || 'a room'}"`,
+        roomId: id,
+        createdAt: serverTimestamp(),
+        read: false,
+        senderId: auth.currentUser.uid,
+      });
+
+      setInviteFriends((prev) =>
+        prev.map((f) => (f.uid === friend.uid ? { ...f, invited: true } : f))
+      );
+    } catch (e) {
+      Alert.alert(t('error'), t('failedToSendInvite'));
+    } finally {
+      setInvitingId(null);
+    }
   };
 
   if (!room) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <View style={styles.loadingCard}>
-          <ActivityIndicator size="large" color="#E8A4C7" />
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator size="large" color={colors.textPrimary} />
+          <Text style={styles.loadingText}>{t('roomLoading')}</Text>
         </View>
       </SafeAreaView>
     );
   }
+
+  if (!canAccessRoom) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <View style={styles.loadingCard}>
+          <Text style={styles.privateRoomIcon}>🔒</Text>
+          <Text style={styles.loadingText}>{t('privateRoom')}</Text>
+          <Text style={styles.privateRoomSubtext}>{t('privateRoomSubtext')}</Text>
+          <Pressable style={styles.privateRoomBackButton} onPress={() => router.back()}>
+            <Text style={styles.privateRoomBackText}>{t('goBack')}</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const currentUid = auth.currentUser?.uid;
+
+  const renderPersonCard = ({
+    person,
+    isHost = false,
+    isSelf = false,
+    onPress,
+    rightAction,
+  }) => {
+    const isFriend = friendIdSet.has(person.uid);
+
+    return (
+      <View
+        key={person.uid}
+        style={[styles.personCard, isHost && styles.personCardHost]}
+      >
+        <Pressable
+          style={styles.personCardMain}
+          onPress={onPress}
+          disabled={!onPress}
+        >
+          <PressableUserAvatar
+            snapshot={{
+              name: person.nickname || t('anonymous'),
+              photoURL: person.photoURL || null,
+            }}
+            size={44}
+            style={styles.personAvatar}
+          />
+          <View style={styles.personInfo}>
+            <View style={styles.personNameRow}>
+              <Text style={styles.personName}>{person.nickname || t('anonymous')}</Text>
+              {isHost ? (
+                <View style={styles.inlineTag}>
+                  <Text style={styles.inlineTagText}>{t('hostTag')}</Text>
+                </View>
+              ) : null}
+              {isSelf ? (
+                <View style={[styles.inlineTag, styles.inlineTagYou]}>
+                  <Text style={styles.inlineTagText}>{t('youTag')}</Text>
+                </View>
+              ) : null}
+              {person.isOutTonight ? <View style={styles.liveDot} /> : null}
+            </View>
+            <View style={styles.personSubtitleRow}>
+              {person.major ? (
+                <>
+                  <IconSchool size={14} color={colors.textMuted} />
+                  <Text style={styles.personMajor}>{person.major}</Text>
+                </>
+              ) : null}
+              {isFriend ? (
+                <View style={styles.friendTag}>
+                  <Text style={styles.friendTagText}>{t('friendTagLabel')}</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        </Pressable>
+        {rightAction}
+      </View>
+    );
+  };
 
   return (
     <KeyboardAvoidingView
@@ -443,277 +1131,298 @@ export default function RoomDetails() {
       keyboardVerticalOffset={0}
     >
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <View style={styles.headerLeft}>
-              <Pressable style={styles.backButton} onPress={() => router.back()}>
-                <Ionicons name="arrow-back" size={24} color="#E8A4C7" />
+        <View style={styles.topBar}>
+          <Pressable style={styles.backButtonCircle} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+          </Pressable>
+
+          <View style={styles.topBarRight}>
+            {isCreator ? (
+              <Pressable style={styles.deleteIconButton} onPress={handleDeleteRoom}>
+                <Ionicons name="trash-outline" size={20} color={colors.danger} />
               </Pressable>
-              <View style={styles.titleContainer}>
-                <Text style={styles.title} numberOfLines={1}>{room?.name || 'Untitled Room'}</Text>
-                <Text style={styles.subtitle}>{participants.length}/{room?.maxParticipants || '?'} participants</Text>
-              </View>
-            </View>
-            <View style={styles.headerRight}>
-              {isParticipant && (
-                <Pressable 
-                  style={[styles.chatToggleButton, showChat && styles.chatToggleButtonActive]} 
-                  onPress={() => setShowChat(!showChat)}
-                >
-                  <Ionicons name={showChat ? "list" : "chatbubbles"} size={20} color={showChat ? "#4A3B47" : "#E8A4C7"} />
-                </Pressable>
-              )}
-              {isCreator && (
-                <Pressable style={styles.deleteButton} onPress={handleDeleteRoom}>
-                   <Ionicons name="trash-outline" size={20} color="#E8A4C7" />
-                </Pressable>
-              )}
-            </View>
+            ) : null}
+            {isParticipant ? (
+              <Pressable style={styles.chatPill} onPress={() => setShowChat(true)}>
+                {hasUnreadMessages ? <View style={styles.chatUnreadDot} /> : null}
+                <IconMessageCircle size={18} color={colors.textPrimary} />
+                <Text style={styles.chatPillText}>{t('chat')}</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
-        {/* --- CHAT MODAL (FIXED KEYBOARD OFFSET) --- */}
-        <Modal visible={showChat} animationType="slide" presentationStyle="pageSheet">
-          {/* FIX: keyboardVerticalOffset={100} adds space for the modal header 
-              so the keyboard doesn't cover the input.
-          */}
-          <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-            style={{flex: 1, backgroundColor: '#4A3B47'}}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0} 
-          >
-            <View style={styles.chatContainer}>
-              <View style={styles.chatHeader}>
-                <View style={styles.chatHeaderContent}>
-                  <Text style={styles.chatTitle}>room chat 💬</Text>
-                  <Pressable style={styles.closeChatButton} onPress={() => setShowChat(false)}>
-                     <Ionicons name="close" size={24} color="#E8A4C7" />
-                  </Pressable>
+        <Modal
+          visible={showChat}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={closeChat}
+        >
+          <SafeAreaView style={styles.chatContainer} edges={['top']}>
+            <View style={styles.chatHeader}>
+              <Text style={styles.chatRoomName} numberOfLines={1}>
+                {room?.name || t('roomFallback')}
+              </Text>
+              <Pressable style={styles.closeChatButton} onPress={closeChat} hitSlop={8}>
+                <Ionicons name="close" size={24} color={colors.textPrimary} />
+              </Pressable>
+            </View>
+
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderChatMessage}
+              contentContainerStyle={styles.flatListContent}
+              style={styles.messagesFlatList}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              automaticallyAdjustKeyboardInsets
+              onContentSizeChange={onContentSizeChange}
+              onScrollToIndexFailed={onScrollToIndexFailed}
+            />
+
+            {replyingTo ? (
+              <View style={styles.replyBar}>
+                <View style={styles.replyBarContent}>
+                  <Text style={styles.replyBarName}>{replyingTo.senderLabel}</Text>
+                  <Text style={styles.replyBarText} numberOfLines={1}>{replyingTo.text}</Text>
                 </View>
+                <Pressable onPress={() => setReplyingTo(null)} hitSlop={8}>
+                  <Ionicons name="close" size={20} color={colors.textMuted} />
+                </Pressable>
               </View>
+            ) : null}
 
-              <FlatList
-                ref={flatListRef}
-                data={messages}
-                keyExtractor={(item) => item.id}
-                renderItem={renderChatMessage}
-                contentContainerStyle={styles.flatListContent}
-                style={styles.messagesFlatList}
-                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-                showsVerticalScrollIndicator={false}
-              />
-
-              <View style={styles.inputContainer}>
-                <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={[styles.input, isDisabled && styles.inputDisabled]}
-                    placeholder="Type your message..."
-                    placeholderTextColor="#999"
-                    value={message}
-                    onChangeText={setMessage}
-                    multiline={false}
-                    maxLength={500}
-                    editable={!isDisabled}
-                  />
-                  <Pressable 
-                    style={[styles.sendButton, (message.trim() === '' || isDisabled) && styles.sendButtonDisabled]} 
-                    onPress={handleSendPress}
-                    disabled={message.trim() === '' || isDisabled}
-                  >
-                     <Ionicons name="send" size={20} color={isDisabled ? "#999" : "#E1B604"} />
-                  </Pressable>
-                </View>
+            <View style={[styles.inputContainer, { paddingBottom: chatInputBottomPadding }]}>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={[styles.input, isDisabled && styles.inputDisabled]}
+                  placeholder={t('typeMessage')}
+                  placeholderTextColor={colors.textMuted}
+                  value={message}
+                  onChangeText={setMessage}
+                  multiline={false}
+                  maxLength={500}
+                  editable={!isDisabled}
+                />
+                <Pressable
+                  style={[styles.sendButton, (message.trim() === '' || isDisabled) && styles.sendButtonDisabled]}
+                  onPress={handleSendPress}
+                  disabled={message.trim() === '' || isDisabled}
+                >
+                  <Ionicons name="send" size={20} color={isDisabled ? colors.textMuted : colors.textPrimary} />
+                </Pressable>
               </View>
             </View>
-          </KeyboardAvoidingView>
+          </SafeAreaView>
         </Modal>
 
-        <ScrollView 
+        <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={true}
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.infoCard}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>room details 🍺</Text>
-              {isCreator && (
-                <View style={styles.creatorBadge}>
-                  <Text style={styles.creatorBadgeText}>👑 Host</Text>
-                </View>
-              )}
+          {/* Hero */}
+          <View style={styles.heroSection}>
+            <Text style={styles.heroTitle}>{room?.name || t('untitledRoom')}</Text>
+
+            <View style={styles.metaPillRow}>
+              <View style={styles.metaPill}>
+                <IconCalendar size={15} color={colors.textSecondary} />
+                <Text style={styles.metaPillText}>{formattedDate}</Text>
+              </View>
+              <View style={styles.metaPill}>
+                <IconClock size={15} color={colors.textSecondary} />
+                <Text style={styles.metaPillText}>{formattedTime}</Text>
+              </View>
             </View>
-            
-            <View style={styles.infoGrid}>
-              <View style={styles.infoItem}>
-                 <Ionicons name="location-outline" size={20} color="#E1B604" style={{marginRight:10}} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Location</Text>
-                  <Text style={styles.infoValue}>{getDisplayLocation()}</Text>
-                </View>
-              </View>
 
-              <View style={styles.infoItem}>
-                 <Ionicons name="calendar-outline" size={20} color="#E1B604" style={{marginRight:10}} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Date</Text>
-                  <Text style={styles.infoValue}>{formattedDate}</Text>
-                </View>
-              </View>
-              
-              <View style={styles.infoItem}>
-                <Ionicons name="time-outline" size={20} color="#E1B604" style={{marginRight:10}} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Time</Text>
-                  <Text style={styles.infoValue}>{formattedTime}</Text>
-                </View>
-              </View>
-              
-              <View style={styles.infoItem}>
-                <Ionicons name="people-outline" size={20} color="#E1B604" style={{marginRight:10}} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoLabel}>Capacity</Text>
-                  <Text style={styles.infoValue}>{participants.length}/{room?.maxParticipants || 0}</Text>
-                </View>
-              </View>
+            <View style={styles.locationRow}>
+              <IconMapPin size={16} color={colors.accent} />
+              <Text style={styles.locationText}>{getDisplayLocation()}</Text>
+            </View>
 
-              {room?.description && (
-                <View style={styles.infoItem}>
-                   <Ionicons name="document-text-outline" size={20} color="#E1B604" style={{marginRight:10}} />
-                  <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Description</Text>
-                    <Text style={styles.infoValue}>{room.description}</Text>
-                  </View>
-                </View>
-              )}
+            {room?.description ? (
+              <View style={styles.descriptionBox}>
+                <Text style={styles.descriptionText}>{room.description}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          {/* Capacity */}
+          <View style={styles.capacitySection}>
+            <View style={styles.capacityHeader}>
+              <Text style={styles.capacityLabel}>{t('participantsLabel')}</Text>
+              <View style={styles.capacityBadge}>
+                <Text style={styles.capacityBadgeText}>
+                  {participants.length} / {room?.maxParticipants || 0}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.capacityTrack}>
+              <View
+                style={[styles.capacityFill, { width: `${capacityFill * 100}%` }]}
+              />
             </View>
           </View>
 
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>👥 Participants</Text>
-              <View style={styles.participantCount}>
-                <Text style={styles.participantCountText}>{participants.length}</Text>
-              </View>
-            </View>
-            
-            <View style={styles.participantsList}>
-              {participants.length > 0 ? (
-                participants.map((p, index) => (
-                  <View key={p.uid} style={[styles.participantCard, index === 0 && styles.firstParticipantCard]}>
-                    <View style={styles.participantLeft}>
-                      <View style={styles.participantAvatar}>
-                        <Text style={styles.participantAvatarText}>{(p.nickname || 'A').charAt(0).toUpperCase()}</Text>
-                      </View>
-                      <View style={styles.participantInfo}>
-                        <Pressable onPress={() => handleUserProfileClick(p.uid)}>
-                          <View style={styles.participantNameContainer}>
-                            <Text style={[styles.participantName, styles.clickableUsername]}>
-                              {p.nickname || 'Anonymous'}
-                              {p.uid === room.createdBy && <Text style={styles.hostBadge}> 👑</Text>}
-                              {p.uid === auth.currentUser?.uid && <Text style={styles.youBadge}> (You)</Text>}
-                            </Text>
-                            {isParticipant && p.uid !== auth.currentUser?.uid && (
-                              <Pressable style={styles.reportButton} onPress={() => handleReportUser(p)}>
-                                <Ionicons name="alert-circle-outline" size={24} color="#C62828" />
-                              </Pressable>
-                            )}
-                          </View>
-                          {p.major && <Text style={styles.participantMajor}>🎓 {p.major}</Text>}
-                        </Pressable>
-                      </View>
-                    </View>
-                    {isCreator && p.uid !== auth.currentUser?.uid && (
-                      <Pressable style={styles.kickButton} onPress={() => handleKickParticipant(p)}>
-                        <Text style={styles.kickButtonText}>Remove</Text>
+          {/* Participants */}
+          <Text style={styles.sectionLabel}>{t('inTheRoom')}</Text>
+          <View style={styles.cardsList}>
+            {participants.length > 0 ? (
+              participants.map((p) =>
+                renderPersonCard({
+                  person: p,
+                  isHost: p.uid === room.createdBy,
+                  isSelf: p.uid === currentUid,
+                  onPress: () => handleUserProfileClick(p.uid),
+                  rightAction:
+                    isCreator && p.uid !== currentUid ? (
+                      <Pressable
+                        style={styles.kickButton}
+                        onPress={() => handleKickParticipant(p)}
+                      >
+                        <Text style={styles.kickButtonText}>{t('removeParticipant')}</Text>
                       </Pressable>
-                    )}
-                  </View>
-                ))
-              ) : (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyIcon}>👻</Text>
-                  <Text style={styles.emptyText}>No participants yet</Text>
-                </View>
-              )}
-            </View>
+                    ) : null,
+                })
+              )
+            ) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>{t('noParticipantsYet')}</Text>
+              </View>
+            )}
           </View>
 
-          {isCreator && (
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📋 Join Requests</Text>
-                {joinRequests.length > 0 && (
-                  <View style={styles.requestCount}>
-                    <Text style={styles.requestCountText}>{joinRequests.length}</Text>
-                  </View>
-                )}
-              </View>
-              
-              {joinRequests.length > 0 && (
-                <Pressable style={styles.approveAllButton} onPress={async () => { for (const r of joinRequests) await handleApprove(r); }}>
-                  <Text style={styles.approveAllText}>✅ Approve All ({joinRequests.length})</Text>
-                </Pressable>
-              )}
-
-              <View style={styles.requestsList}>
-                {joinRequests.length > 0 ? (
-                  joinRequests.map((r) => (
-                    <View key={r.uid} style={styles.requestCard}>
-                      <View style={styles.requestLeft}>
-                        <View style={styles.requestAvatar}>
-                          <Text style={styles.requestAvatarText}>{(r.nickname || 'A').charAt(0).toUpperCase()}</Text>
-                        </View>
-                        <View style={styles.requestInfo}>
-                          <Pressable onPress={() => handleUserProfileClick(r.uid)}>
-                            <Text style={[styles.requestName, styles.clickableUsername]}>{r.nickname || 'Anonymous'}</Text>
-                            {r.major && <Text style={styles.requestMajor}>🎓 {r.major}</Text>}
-                          </Pressable>
-                        </View>
-                      </View>
-                      <View style={styles.requestActions}>
-                        <Pressable 
-                            style={[
-                                styles.approveButton, 
-                                isRoomFull && styles.approveButtonDisabled 
-                            ]} 
-                            disabled={isRoomFull}
-                            onPress={() => handleApprove(r)}
+          {/* Invite friends (participants only) */}
+          {isParticipant && !isRoomFull ? (
+            <>
+              <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>{t('inviteFriendsSection')}</Text>
+              <Text style={styles.inviteSubtext}>
+                {t('inviteFriendsSubtext')}
+              </Text>
+              <View style={styles.cardsList}>
+                {inviteFriends.length > 0 ? (
+                  inviteFriends.map((friend) =>
+                    renderPersonCard({
+                      person: { ...friend, isOutTonight: false },
+                      onPress: () => handleUserProfileClick(friend.uid),
+                      rightAction: (
+                        <Pressable
+                          style={[
+                            styles.inviteButton,
+                            friend.invited && styles.inviteButtonDisabled,
+                          ]}
+                          disabled={friend.invited || invitingId === friend.uid}
+                          onPress={() => handleInviteFriend(friend)}
                         >
-                          <Ionicons name="checkmark" size={20} color="#fff" />
+                          {invitingId === friend.uid ? (
+                            <ActivityIndicator size="small" color={colors.onAccent} />
+                          ) : (
+                            <Text
+                              style={[
+                                styles.inviteButtonText,
+                                friend.invited && styles.inviteButtonTextDisabled,
+                              ]}
+                            >
+                              {friend.invited ? t('invited') : t('invite')}
+                            </Text>
+                          )}
                         </Pressable>
-                        <Pressable style={styles.declineButton} onPress={() => handleDecline(r)}>
-                          <Ionicons name="close" size={20} color="#fff" />
-                        </Pressable>
-                      </View>
-                    </View>
-                  ))
+                      ),
+                    })
+                  )
                 ) : (
                   <View style={styles.emptyState}>
-                    <Text style={styles.emptyIcon}>📪</Text>
-                    <Text style={styles.emptyText}>No pending requests</Text>
+                    <Text style={styles.emptyText}>{t('noFriendsToInvite')}</Text>
                   </View>
                 )}
               </View>
-            </View>
-          )}
+            </>
+          ) : null}
 
-          {!isParticipant && !isCreator && (
+          {/* Join requests (host only) */}
+          {isCreator ? (
+            <>
+              <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>{t('joinRequestsSection')}</Text>
+              {joinRequests.length > 0 ? (
+                <Pressable
+                  style={styles.approveAllButton}
+                  onPress={async () => {
+                    for (const r of joinRequests) await handleApprove(r);
+                  }}
+                >
+                  <Text style={styles.approveAllText}>{t('approveAll', { count: joinRequests.length })}</Text>
+                </Pressable>
+              ) : null}
+              <View style={styles.cardsList}>
+                {joinRequests.length > 0 ? (
+                  joinRequests.map((r) =>
+                    renderPersonCard({
+                      person: { ...r, isOutTonight: false },
+                      onPress: () => handleUserProfileClick(r.uid),
+                      rightAction: (
+                        <View style={styles.requestActions}>
+                          <Pressable
+                            style={[
+                              styles.approveButton,
+                              isRoomFull && styles.approveButtonDisabled,
+                            ]}
+                            disabled={isRoomFull}
+                            onPress={() => handleApprove(r)}
+                          >
+                            <Ionicons name="checkmark" size={18} color={colors.white} />
+                          </Pressable>
+                          <Pressable
+                            style={styles.declineButton}
+                            onPress={() => handleDecline(r)}
+                          >
+                            <Ionicons name="close" size={18} color={colors.white} />
+                          </Pressable>
+                        </View>
+                      ),
+                    })
+                  )
+                ) : (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyText}>{t('noPendingRequests')}</Text>
+                  </View>
+                )}
+              </View>
+            </>
+          ) : null}
+
+          {isParticipant && !isCreator ? (
+            <View style={styles.section}>
+              <Pressable style={styles.leaveRoomButton} onPress={handleLeaveRoom}>
+                <Ionicons name="exit-outline" size={18} color={colors.white} />
+                <Text style={styles.leaveRoomButtonText}>{t('leaveRoom')}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {!isParticipant && !isCreator && canJoinRoom && (
             <View style={styles.section}>
               <View style={styles.joinPrompt}>
                 <Text style={styles.joinPromptIcon}>🍻</Text>
-                <Text style={styles.joinPromptText}>Want to join this room?</Text>
+                <Text style={styles.joinPromptText}>{t('wantToJoinRoom')}</Text>
+                {room?.invites?.includes(currentUid) ? (
+                  <Text style={styles.invitedHint}>{t('invitedToRoom')}</Text>
+                ) : null}
                 {hasRequestedJoin ? (
                   <View style={styles.pendingContainer}>
                     <View style={styles.pendingBadge}>
-                      <Text style={styles.pendingText}>⏳ Pending</Text>
+                      <Text style={styles.pendingText}>{t('pendingStatus')}</Text>
                     </View>
                     <Pressable style={styles.cancelRequestButton} onPress={handleCancelRequest}>
-                      <Text style={styles.cancelRequestButtonText}>Cancel Request</Text>
+                      <Text style={styles.cancelRequestButtonText}>{t('cancelRequest')}</Text>
                     </Pressable>
                   </View>
                 ) : (
                   <Pressable style={styles.joinButton} onPress={handleRequestJoin}>
-                    <Text style={styles.joinButtonText}>🙋‍♂️ Request to Join</Text>
+                    <Text style={styles.joinButtonText}>{t('requestToJoin')}</Text>
                   </Pressable>
                 )}
               </View>
@@ -721,206 +1430,574 @@ export default function RoomDetails() {
           )}
         </ScrollView>
 
-        <Modal visible={showUserProfile} animationType="slide" presentationStyle="pageSheet">
-          {selectedUserProfile && <UserProfile uid={selectedUserProfile} onClose={closeUserProfile} />}
+        <Modal
+          visible={showUserProfile}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={closeUserProfile}
+        >
+          {selectedUserProfile ? (
+            <UserProfile uid={selectedUserProfile} onClose={closeUserProfile} />
+          ) : null}
         </Modal>
 
-        <Modal visible={reportModalVisible} transparent={true} animationType="fade">
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <KeyboardAvoidingView 
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-              style={styles.reportModalOverlay}
-            >
-              <TouchableWithoutFeedback>
-                <View style={styles.reportModalContainer}>
-                  <View style={styles.reportModalHeader}>
-                    <Text style={styles.reportModalTitle}>Report User</Text>
-                    <Pressable 
-                      style={styles.reportModalClose} 
-                      onPress={() => { 
-                        setReportModalVisible(false); 
-                        setReportedUser(null); 
-                        setReportReason(''); 
-                      }}
-                    >
-                      <Ionicons name="close" size={20} color="#E8D5DA" />
-                    </Pressable>
-                  </View>
-                  
-                  <Text style={styles.reportModalSubtitle}>
-                    Reporting: {reportedUser?.nickname || 'User'}
-                  </Text>
-                  
-                  <TextInput
-                    style={styles.reportReasonInput}
-                    placeholder="Describe the issue..."
-                    placeholderTextColor="#999"
-                    value={reportReason}
-                    onChangeText={setReportReason}
-                    multiline={true}
-                    maxLength={500}
-                    blurOnSubmit={true}
-                    returnKeyType="done"
-                    onSubmitEditing={Keyboard.dismiss}
-                  />
-                  
-                  <View style={styles.reportModalButtons}>
-                    <Pressable 
-                      style={styles.reportCancelButton} 
-                      onPress={() => { 
-                        setReportModalVisible(false); 
-                        setReportedUser(null); 
-                        setReportReason(''); 
-                      }}
-                    >
-                      <Text style={styles.reportCancelButtonText}>Cancel</Text>
-                    </Pressable>
-                    
-                    <Pressable 
-                      style={[
-                        styles.reportSubmitButton, 
-                        !reportReason.trim() && styles.reportSubmitButtonDisabled
-                      ]} 
-                      onPress={submitReport} 
-                      disabled={!reportReason.trim()}
-                    >
-                      <Text style={styles.reportSubmitButtonText}>Submit</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              </TouchableWithoutFeedback>
-            </KeyboardAvoidingView>
-          </TouchableWithoutFeedback>
-        </Modal>
+        <ReactionListModal
+          visible={!!likesModalUserIds?.length}
+          emoji="❤️"
+          userIds={likesModalUserIds || []}
+          onClose={() => setLikesModalUserIds(null)}
+        />
 
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#4A3B47' },
-  loadingContainer: { flex: 1, backgroundColor: '#4A3B47', justifyContent: 'center', alignItems: 'center' },
-  loadingCard: { backgroundColor: '#5A4B5C', padding: 32, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#7A6B7D' },
-  loadingText: { color: '#E8A4C7', fontSize: 16, fontWeight: '500', marginTop: 16 },
-  header: { backgroundColor: '#4A3B47', borderBottomWidth: 1, borderBottomColor: '#5A4B5C', paddingTop: Platform.OS === 'ios' ? 0 : 10 },
-  headerContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  backButton: { padding: 8, marginRight: 12 },
-  titleContainer: { flex: 1, marginRight: 12 },
-  title: { color: '#E8A4C7', fontSize: 20, fontWeight: 'bold', marginBottom: 2 },
-  subtitle: { color: '#E8D5DA', fontSize: 14, fontWeight: '400' },
-  headerRight: { flexDirection: 'row', gap: 8 },
-  chatToggleButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  chatToggleButtonActive: { backgroundColor: '#E8A4C7' },
-  deleteButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  scrollView: { flex: 1 },
-  scrollContent: { flexGrow: 1, paddingBottom: 100 },
-  infoCard: { backgroundColor: '#E8D5DA', marginHorizontal: 20, marginTop: 20, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#3A6A6F', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 3 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
-  cardTitle: { color: '#4d4c41', fontSize: 20, fontWeight: 'bold' },
-  creatorBadge: { backgroundColor: '#E1B604', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  creatorBadgeText: { color: '#E8D5DA', fontSize: 12, fontWeight: 'bold' },
-  infoGrid: { gap: 16 },
-  infoItem: { flexDirection: 'row', alignItems: 'flex-start' },
-  infoContent: { flex: 1 },
-  infoLabel: { color: '#b08f0bff', fontSize: 14, fontWeight: '600', marginBottom: 2 },
-  infoValue: { color: '#4d4c41', fontSize: 16, fontWeight: '400', lineHeight: 22 },
-  section: { marginHorizontal: 20, marginTop: 24 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
-  sectionTitle: { color: '#E8A4C7', fontSize: 18, fontWeight: 'bold' },
-  participantCount: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  participantCountText: { color: '#E8D5DA', fontSize: 14, fontWeight: '600' },
-  requestCount: { backgroundColor: '#E1B604', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
-  requestCountText: { color: '#E1B604', fontSize: 14, fontWeight: 'bold' },
-  participantsList: { gap: 12 },
-  participantCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#3A6A6F' },
-  firstParticipantCard: { borderWidth: 2, borderColor: '#E1B604' },
-  participantLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  participantAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  participantAvatarText: { color: '#E8D5DA', fontSize: 18, fontWeight: 'bold' },
-  participantInfo: { flex: 1 },
-  participantNameContainer: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
-  participantName: { color: '#4d4c41', fontSize: 16, fontWeight: '600' },
-  clickableUsername: { textDecorationLine: 'underline' },
-  hostBadge: { color: '#E1B604', fontWeight: 'bold' },
-  youBadge: { color: '#E1B604', fontWeight: 'bold' },
-  participantMajor: { color: '#666', fontSize: 14 },
-  
-  // UPDATED REPORT BUTTON STYLE
-  reportButton: { 
-    marginLeft: 8, 
-    padding: 6,
-    backgroundColor: 'rgba(198, 40, 40, 0.1)',
-    borderRadius: 8
+const createStyles = (colors) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  loadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
+  loadingCard: { backgroundColor: colors.panel, padding: 32, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: colors.borderSoft },
+  loadingText: { color: colors.textPrimary, fontSize: 16, fontWeight: '500', marginTop: 16 },
+  privateRoomIcon: { fontSize: 40 },
+  privateRoomSubtext: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
-  
-  kickButton: { backgroundColor: '#C62828', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  kickButtonText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  approveAllButton: { backgroundColor: '#E1B604', padding: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
-  approveAllText: { color: '#E8D5DA', fontSize: 14, fontWeight: 'bold' },
-  requestsList: { gap: 12 },
-  requestCard: { backgroundColor: '#E8D5DA', padding: 16, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 2, borderColor: '#E1B604' },
-  requestLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  requestAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  requestAvatarText: { color: '#E1B604', fontSize: 18, fontWeight: 'bold' },
-  requestInfo: { flex: 1 },
-  requestName: { color: '#4d4c41', fontSize: 16, fontWeight: '600' },
-  requestMajor: { color: '#666', fontSize: 14 },
-  requestActions: { flexDirection: 'row', gap: 8 },
-  approveButton: { backgroundColor: '#E1B604', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
-  approveButtonDisabled: { backgroundColor: '#999', opacity: 0.6 },
-  declineButton: { backgroundColor: '#C62828', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
-  chatContainer: { flex: 1, backgroundColor: '#4A3B47' },
-  chatHeader: { backgroundColor: '#5A4B5C', paddingTop: Platform.OS === 'ios' ? 20 : 10, borderBottomWidth: 1, borderBottomColor: '#7A6B7D' },
-  chatHeaderContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
-  chatTitle: { color: '#E8A4C7', fontSize: 18, fontWeight: 'bold' },
-  closeChatButton: { padding: 8 },
-  messagesFlatList: { flex: 1, backgroundColor: '#4A3B47' },
-  flatListContent: { paddingVertical: 20, paddingHorizontal: 16 },
-  messageContainer: { marginBottom: 12 },
-  myMessage: { alignItems: 'flex-end' },
-  otherMessage: { alignItems: 'flex-start' },
-  messageBubble: { maxWidth: '80%', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20 },
-  myMessageBubble: { backgroundColor: '#E8D5DA', borderBottomRightRadius: 4 },
-  otherMessageBubble: { backgroundColor: '#5A4B5C', borderBottomLeftRadius: 4 },
-  senderName: { color: '#E8A4C7', fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
+  privateRoomBackButton: {
+    marginTop: 20,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  privateRoomBackText: {
+    color: colors.onAccent,
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+
+  // Top bar
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  backButtonCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.panelElevated,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  deleteIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(229, 57, 53, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 57, 53, 0.25)',
+  },
+  chatPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: colors.panelElevated,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    position: 'relative',
+  },
+  chatUnreadDot: {
+    position: 'absolute',
+    top: 6,
+    left: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+    borderWidth: 1.5,
+    borderColor: colors.panelElevated,
+  },
+  chatPillText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+
+  scrollView: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingHorizontal: 20, paddingBottom: 100 },
+
+  // Hero
+  heroSection: {
+    marginTop: 4,
+    marginBottom: 24,
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: colors.textPrimary,
+    letterSpacing: -0.5,
+    marginBottom: 14,
+  },
+  metaPillRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  metaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: colors.panelElevated,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  metaPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  locationText: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  descriptionBox: {
+    backgroundColor: colors.panelElevated,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  descriptionText: {
+    fontSize: 15,
+    color: colors.textPrimary,
+    lineHeight: 22,
+  },
+
+  // Capacity
+  capacitySection: {
+    marginBottom: 28,
+  },
+  capacityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  capacityLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  capacityBadge: {
+    backgroundColor: colors.panelSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  capacityBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  capacityTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.panelElevated,
+    overflow: 'hidden',
+  },
+  capacityFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+  },
+
+  // Sections
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  sectionLabelSpaced: {
+    marginTop: 8,
+  },
+  cardsList: {
+    gap: 10,
+    marginBottom: 24,
+  },
+
+  // Person cards
+  personCard: {
+    backgroundColor: colors.panel,
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  personCardHost: {
+    borderColor: colors.accent,
+    backgroundColor: colors.panelSoft,
+  },
+  personCardMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  personAvatar: {
+    marginRight: 12,
+  },
+  personInfo: {
+    flex: 1,
+  },
+  personNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
+  },
+  personName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  inlineTag: {
+    backgroundColor: colors.panelElevated,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  inlineTagYou: {
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.accent,
+  },
+  inlineTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    textTransform: 'lowercase',
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+  },
+  personSubtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  personMajor: {
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  friendTag: {
+    backgroundColor: colors.panelSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.accent,
+  },
+  friendTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.accentDark,
+    textTransform: 'lowercase',
+  },
+
+  inviteSubtext: {
+    color: colors.textMuted,
+    fontSize: 13,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  inviteButton: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginLeft: 8,
+    minWidth: 72,
+    alignItems: 'center',
+  },
+  inviteButtonDisabled: {
+    backgroundColor: colors.panelElevated,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  inviteButtonText: {
+    color: colors.onAccent,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  inviteButtonTextDisabled: {
+    color: colors.textMuted,
+  },
+  invitedHint: {
+    color: colors.accentDark,
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  kickButton: {
+    backgroundColor: colors.danger,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
+  kickButtonText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  approveAllButton: {
+    backgroundColor: colors.accent,
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  approveAllText: {
+    color: colors.onAccent,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  requestActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginLeft: 8,
+  },
+  approveButton: {
+    backgroundColor: colors.accent,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  approveButtonDisabled: {
+    backgroundColor: colors.disabled,
+    opacity: 0.6,
+  },
+  declineButton: {
+    backgroundColor: colors.danger,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chatContainer: { flex: 1, backgroundColor: colors.background },
+  chatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+    backgroundColor: colors.background,
+  },
+  chatRoomName: {
+    flex: 1,
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '700',
+    marginRight: 12,
+  },
+  closeChatButton: { padding: 4 },
+  messagesFlatList: { flex: 1, backgroundColor: colors.background },
+  flatListContent: { paddingVertical: 12, paddingHorizontal: 16 },
+  messageRowOuter: { marginBottom: 8, overflow: 'visible' },
+  messageRowOuterMe: { alignItems: 'flex-end' },
+  messageRowOuterHighlighted: {
+    borderRadius: 12,
+    backgroundColor: colors.panelElevated,
+  },
+  swipeableContainer: { overflow: 'visible' },
+  swipeableChildContainer: { overflow: 'visible' },
+  messageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 8,
+    gap: 8,
+    maxWidth: '88%',
+  },
+  messageRowMe: {
+    justifyContent: 'flex-end',
+    alignSelf: 'flex-end',
+  },
+  messageRowOther: {
+    justifyContent: 'flex-start',
+    alignSelf: 'flex-start',
+  },
+  chatMessageAvatar: {
+    marginBottom: 2,
+    width: 32,
+    height: 32,
+  },
+  bubblePressable: { position: 'relative', overflow: 'visible', maxWidth: '75%' },
+  bubblePressableWithLike: { paddingBottom: 12 },
+  bubblePressableMe: { alignSelf: 'flex-end' },
+  bubblePressableOther: { alignSelf: 'flex-start' },
+  bubbleAlignEnd: { alignSelf: 'flex-end' },
+  bubbleAlignStart: { alignSelf: 'flex-start' },
+  messageBubble: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 20 },
+  myMessageBubble: { backgroundColor: colors.panelElevated, borderBottomRightRadius: 4, borderWidth: 1, borderColor: colors.borderSoft },
+  otherMessageBubble: { backgroundColor: colors.panel, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: colors.borderSoft },
+  senderName: { color: colors.iconPrimary, fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
   messageText: { fontSize: 15, lineHeight: 20 },
-  myMessageText: { color: '#4d4c41' },
-  otherMessageText: { color: '#E8D5DA' },
+  myMessageText: { color: colors.textPrimary },
+  otherMessageText: { color: colors.textPrimary },
   timestamp: { fontSize: 10, marginTop: 4, alignSelf: 'flex-end' },
-  myTimestamp: { color: '#666' },
-  otherTimestamp: { color: '#aaa' },
-  inputContainer: { backgroundColor: '#5A4B5C', paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: '#7A6B7D' },
+  myTimestamp: { color: colors.textMuted },
+  otherTimestamp: { color: colors.textMuted },
+  replyQuote: {
+    borderLeftWidth: 3,
+    paddingLeft: 8,
+    marginBottom: 6,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  replyQuoteMe: {
+    backgroundColor: colors.borderSoft,
+    borderLeftColor: colors.accent,
+  },
+  replyQuoteOther: {
+    backgroundColor: colors.panelElevated,
+    borderLeftColor: colors.accent,
+  },
+  replyQuoteName: { fontSize: 11, fontWeight: '700', color: colors.accent, marginBottom: 2 },
+  replyQuoteText: { fontSize: 12, color: colors.textSecondary },
+  likeBadge: {
+    position: 'absolute',
+    bottom: -6,
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  likeBadgeMe: { right: 6 },
+  likeBadgeOther: { left: 6 },
+  likeBadgeEmoji: { fontSize: 13, lineHeight: 16 },
+  likeBadgeCount: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginLeft: 3,
+    lineHeight: 14,
+  },
+  swipeReplyContainer: {
+    width: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSoft,
+    backgroundColor: colors.panelElevated,
+    gap: 12,
+  },
+  replyBarContent: {
+    flex: 1,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    paddingLeft: 8,
+  },
+  replyBarName: { fontSize: 12, fontWeight: '700', color: colors.accent, marginBottom: 2 },
+  replyBarText: { fontSize: 13, color: colors.textSecondary },
+  inputContainer: { backgroundColor: colors.panel, borderTopWidth: 1, borderTopColor: colors.borderSoft },
   inputWrapper: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, gap: 12 },
-  input: { flex: 1, backgroundColor: '#4A3B47', borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12, color: '#E8D5DA', fontSize: 15, maxHeight: 100, borderWidth: 1, borderColor: '#7A6B7D' },
+  input: { flex: 1, backgroundColor: colors.panelElevated, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 12, color: colors.textPrimary, fontSize: 15, maxHeight: 100, borderWidth: 1, borderColor: colors.borderSoft },
   inputDisabled: { opacity: 0.6 },
-  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E1B604', justifyContent: 'center', alignItems: 'center' },
-  sendButtonDisabled: { backgroundColor: '#7A6B7D' },
-  joinPrompt: { backgroundColor: '#E8D5DA', padding: 24, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#3A6A6F' },
+  sendButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.accent, justifyContent: 'center', alignItems: 'center' },
+  sendButtonDisabled: { backgroundColor: colors.panelSoft },
+  section: { marginTop: 8 },
+  leaveRoomButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.danger,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+  },
+  leaveRoomButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  joinPrompt: { backgroundColor: colors.panelElevated, padding: 24, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: colors.borderSoft },
   joinPromptIcon: { fontSize: 32, marginBottom: 12 },
-  joinPromptText: { color: '#4d4c41', fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
-  joinButton: { backgroundColor: '#E1B604', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, minWidth: 180, alignItems: 'center' },
-  joinButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  joinPromptText: { color: colors.textPrimary, fontSize: 18, fontWeight: '600', marginBottom: 20, textAlign: 'center' },
+  joinButton: { backgroundColor: colors.accent, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 20, minWidth: 180, alignItems: 'center' },
+  joinButtonText: { color: colors.onAccent, fontSize: 16, fontWeight: 'bold' },
   pendingContainer: { alignItems: 'center', gap: 12 },
-  pendingBadge: { backgroundColor: '#E1B604', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16 },
-  pendingText: { color: '#E1B604', fontSize: 14, fontWeight: 'bold' },
+  pendingBadge: { backgroundColor: colors.panelSoft, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: colors.accent },
+  pendingText: { color: colors.accentDark, fontSize: 14, fontWeight: 'bold' },
   cancelRequestButton: { paddingHorizontal: 16, paddingVertical: 8 },
-  cancelRequestButtonText: { color: '#C62828', fontSize: 14, fontWeight: '500', textDecorationLine: 'underline' },
-  emptyState: { alignItems: 'center', padding: 32, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16 },
-  emptyIcon: { fontSize: 32, marginBottom: 8 },
-  emptyText: { color: '#E8D5DA', fontSize: 16, opacity: 0.7 },
-  reportModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.8)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  reportModalContainer: { backgroundColor: '#5A4B5C', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, borderWidth: 1, borderColor: '#7A6B7D' },
-  reportModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  reportModalTitle: { color: '#E8A4C7', fontSize: 20, fontWeight: 'bold' },
-  reportModalClose: { padding: 4 },
-  reportModalSubtitle: { color: '#E8D5DA', fontSize: 16, marginBottom: 20, textAlign: 'center' },
-  reportReasonInput: { backgroundColor: '#4A3B47', borderRadius: 12, padding: 16, color: '#E8D5DA', fontSize: 15, minHeight: 120, textAlignVertical: 'top', borderWidth: 1, borderColor: '#7A6B7D', marginBottom: 24 },
-  reportModalButtons: { flexDirection: 'row', gap: 12 },
-  reportCancelButton: { flex: 1, backgroundColor: '#7A6B7D', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  reportCancelButtonText: { color: '#E8D5DA', fontSize: 16, fontWeight: 'bold' },
-  reportSubmitButton: { flex: 1, backgroundColor: '#C62828', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
-  reportSubmitButtonDisabled: { opacity: 0.5 },
-  reportSubmitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  cancelRequestButtonText: { color: colors.danger, fontSize: 14, fontWeight: '500', textDecorationLine: 'underline' },
+  emptyState: {
+    alignItems: 'center',
+    padding: 28,
+    backgroundColor: colors.panelElevated,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+  },
+  emptyText: { color: colors.textMuted, fontSize: 14 },
 });

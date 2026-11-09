@@ -1,211 +1,376 @@
-import { Link, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { auth, db } from '../firebase/firebaseConfig';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import LanguagePicker from '../components/LanguagePicker';
+import { useTheme } from '../contexts/ThemeContext';
+import { auth } from '../firebase/firebaseConfig';
+import {
+  ensureLoginHandleForUser,
+  getUserDisplayName,
+  parseUniversityFromEmail,
+  recreateOrphanedUserProfile,
+  resolveLoginEmail,
+} from '../utils/authUtils';
+import { DELETED_USER_NAME, isDeletedUser } from '../utils/deletedUserUtils';
+import {
+  fetchEmailModerationBlock,
+  formatModerationBlockAlert,
+  getModerationBlockInfo,
+} from '../utils/moderationUtils';
+import {
+  getOwnUserData,
+  migrateLegacyUserDocs,
+  setPrivateUser,
+  updatePublicUser,
+} from '../utils/userDocUtils';
 
 export default function Login() {
   const { t } = useTranslation();
-  const [email, setEmail] = useState('');
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(colors, insets.top), [colors, insets.top]);
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const router = useRouter();
+  const { registered, email: registeredEmail, blocked } = useLocalSearchParams();
+  const showVerifyBanner = registered === '1';
+  const showBannedBanner = blocked === 'banned';
+  const showSuspendedBanner = blocked === 'suspended';
 
-  // ✅ VALIDATION: Accepts .edu.tr OR .edu
-  const validateEmail = (email) => {
-    const emailLower = email.toLowerCase().trim();
-    
-    const isEduTr = emailLower.endsWith('.edu.tr');
-    const isEdu = emailLower.endsWith('.edu');
+  const moderationAlertShown = useRef(false);
 
-    if (!isEduTr && !isEdu) {
-      return false;
+  useEffect(() => {
+    if (typeof registeredEmail === 'string' && registeredEmail.trim()) {
+      setIdentifier(registeredEmail.trim());
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(emailLower);
+  }, [registeredEmail]);
+
+  useEffect(() => {
+    if (moderationAlertShown.current || !blocked) return;
+    if (blocked !== 'banned' && blocked !== 'suspended') return;
+
+    moderationAlertShown.current = true;
+    showModerationBlockAlert({ reason: blocked });
+  }, [blocked]);
+
+  const showModerationBlockAlert = (blockInfo) => {
+    const { title, message } = formatModerationBlockAlert(blockInfo, t);
+    Alert.alert(title, message);
+  };
+
+  const getAuthErrorMessage = (error, { context = 'login' } = {}) => {
+    const code = error?.code || '';
+
+    if (code === 'missing-identifier') return t('enterIdentifierAndPassword');
+    if (code === 'invalid-email') return t('yourEmailMustEnd');
+    if (code === 'invalid-instagram') return t('invalidInstagramLogin');
+    if (code === 'user-not-found') return t('noAccountFoundRegister');
+
+    if (code === 'auth/user-not-found') return t('noAccountFoundRegister');
+    if (
+      code === 'auth/wrong-password' ||
+      code === 'auth/invalid-credential' ||
+      code === 'auth/invalid-login-credentials'
+    ) {
+      return t('incorrectPassword');
+    }
+    if (code === 'auth/user-disabled') return t('accountDisabled');
+    if (code === 'auth/invalid-email') return t('invalidEmailFormat');
+    if (code === 'auth/too-many-requests') {
+      return context === 'login' ? t('accountLocked') : t('tooManyAttempts');
+    }
+
+    return context === 'login' ? t('loginFailed') : t('couldNotSendEmail');
   };
 
   const handleForgotPassword = async () => {
-    const trimmedEmail = email.trim();
-    
-    if (!trimmedEmail) {
-      Alert.alert(t('emailRequired'), t('enterStudentEmail'));
-      return;
-    }
-
-    if (!validateEmail(trimmedEmail)) {
-      Alert.alert(t('invalidEmail'), t('validUniversityEmail'));
+    if (!identifier.trim()) {
+      Alert.alert(t('emailRequired'), t('enterLoginIdentifier'));
       return;
     }
 
     setForgotLoading(true);
     try {
-      await sendPasswordResetEmail(auth, trimmedEmail);
-      Alert.alert(t('resetEmailSent'), t('checkYourInbox', { email: trimmedEmail }));
+      const resolvedEmail = await resolveLoginEmail(identifier);
+      await sendPasswordResetEmail(auth, resolvedEmail);
     } catch (error) {
-      let msg = t('failedToSendReset');
-      if (error.code === 'auth/user-not-found') msg = t('noAccountFound');
-      Alert.alert(t('error'), msg);
+      if (error.code === 'missing-identifier' || error.code === 'invalid-email' || error.code === 'invalid-instagram') {
+        Alert.alert(t('error'), getAuthErrorMessage(error));
+      } else {
+        let msg = t('failedToSendReset');
+        if (error.code === 'auth/user-not-found' || error.code === 'user-not-found') {
+          msg = t('noAccountFound');
+        }
+        Alert.alert(t('error'), msg);
+      }
     } finally {
       setForgotLoading(false);
     }
   };
 
   const handleResendVerification = async () => {
-    const trimmedEmail = email.trim();
-    
-    if (!trimmedEmail || !password) {
-      Alert.alert(t('missingInfo'), t('enterEmailPassword'));
+    if (!identifier.trim() || !password) {
+      Alert.alert(t('missingInfo'), t('enterIdentifierAndPassword'));
       return;
     }
 
     setResendLoading(true);
     try {
-      // We must sign in to send the email
-      const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
-      
+      const resolvedEmail = await resolveLoginEmail(identifier);
+      const userCredential = await signInWithEmailAndPassword(auth, resolvedEmail, password);
+
       if (userCredential.user.emailVerified) {
-        Alert.alert(t('alreadyVerified'), t('emailAlreadyVerified'));
+        await migrateLegacyUserDocs(userCredential.user.uid);
+        const userData = await getOwnUserData(userCredential.user.uid);
+        const blockInfo = userData ? getModerationBlockInfo(userData) : null;
+        if (blockInfo) {
+          await signOut(auth);
+          showModerationBlockAlert(blockInfo);
+        } else if (userData?.onboardingComplete !== true) {
+          router.replace('/onboarding');
+        } else {
+          router.replace('/(tabs)/feed');
+        }
       } else {
         await sendEmailVerification(userCredential.user);
         await signOut(auth);
-        Alert.alert(t('sent'), t('verificationEmailSent'));
       }
     } catch (error) {
       console.log('Resend error:', error);
-      let msg = t('couldNotSendEmail');
-      
-      if (error.code === 'auth/user-not-found') msg = t('noAccountWithEmail');
-      else if (error.code === 'auth/wrong-password') msg = t('wrongPassword');
-      else if (error.code === 'auth/too-many-requests') msg = t('tooManyAttempts');
-      
-      Alert.alert(t('error'), msg);
+      Alert.alert(t('error'), getAuthErrorMessage(error, { context: 'resend' }));
     } finally {
       setResendLoading(false);
     }
   };
 
   const handleLogin = async () => {
-    const trimmedEmail = email.trim();
-
-    if (!trimmedEmail || !password) {
-      Alert.alert(t('missingFields'), t('enterEmailAndPassword'));
-      return;
-    }
-
-    if (!validateEmail(trimmedEmail)) {
-      Alert.alert(t('invalidEmail'), t('yourEmailMustEnd'));
+    if (!identifier.trim() || !password) {
+      Alert.alert(t('missingFields'), t('enterIdentifierAndPassword'));
       return;
     }
 
     setLoading(true);
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, password);
-      
-      // Refresh user data to check verification status
-      await userCredential.user.reload();
-      
-      if (!userCredential.user.emailVerified) {
-        await signOut(auth);
-        Alert.alert(
-          t('emailNotVerified'),
-          t('pleaseVerifyEmail'),
-          [
-            { text: t('ok') },
-            { text: t('resendEmail'), onPress: handleResendVerification }
-          ]
-        );
+      const resolvedEmail = await resolveLoginEmail(identifier);
+
+      let emailBlock = null;
+      try {
+        emailBlock = await fetchEmailModerationBlock(resolvedEmail);
+      } catch (emailCheckError) {
+        console.warn('Email moderation check failed:', emailCheckError);
+      }
+      if (emailBlock) {
+        showModerationBlockAlert(emailBlock);
         return;
       }
 
-      // Update last login
-      try {
-        await updateDoc(doc(db, 'users', userCredential.user.uid), {
-          lastLogin: new Date(),
-          emailVerified: true
-        });
-      } catch (e) {
-        console.log('Firestore update ignored');
+      const userCredential = await signInWithEmailAndPassword(auth, resolvedEmail, password);
+
+      await userCredential.user.reload();
+
+      if (!userCredential.user.emailVerified) {
+        await signOut(auth);
+        Alert.alert(t('emailNotVerified'), t('pleaseVerifyEmail'), [
+          { text: t('ok') },
+          { text: t('resendEmail'), onPress: handleResendVerification },
+        ]);
+        return;
       }
 
-      router.replace('/');
+      try {
+        const uid = userCredential.user.uid;
+        let userData = await getOwnUserData(uid);
 
+        if (!userData) {
+          await recreateOrphanedUserProfile(userCredential.user);
+          userData = {
+            email: userCredential.user.email?.toLowerCase() || '',
+            name: getUserDisplayName({}, userCredential.user.email),
+            university: parseUniversityFromEmail(userCredential.user.email),
+            onboardingComplete: false,
+          };
+        } else {
+          try {
+            await migrateLegacyUserDocs(uid);
+          } catch (migrationError) {
+            console.warn('Login migration failed:', migrationError);
+          }
+          userData = (await getOwnUserData(uid)) || userData;
+        }
+
+        if (
+          userData?.name === DELETED_USER_NAME &&
+          userData?.isDeleted !== true
+        ) {
+          const repairedName = getUserDisplayName(userData, userCredential.user.email);
+          await updatePublicUser(uid, { name: repairedName });
+          userData = (await getOwnUserData(uid)) || { ...userData, name: repairedName };
+        }
+
+        if (isDeletedUser(userData)) {
+          await signOut(auth);
+          Alert.alert(t('loginFailed'), t('accountDeleted'));
+          return;
+        }
+
+        const blockInfo = getModerationBlockInfo(userData);
+        if (blockInfo) {
+          await signOut(auth);
+          showModerationBlockAlert(blockInfo);
+          return;
+        }
+
+        const privateUpdates = {
+          email: userCredential.user.email?.toLowerCase() || userData.email || '',
+          lastLogin: new Date(),
+          emailVerified: true,
+        };
+        const publicUpdates = {};
+        if (!userData.name) {
+          publicUpdates.name = getUserDisplayName(userData, userCredential.user.email);
+        }
+        await setPrivateUser(uid, privateUpdates);
+        if (Object.keys(publicUpdates).length > 0) {
+          await updatePublicUser(uid, publicUpdates);
+        }
+        await ensureLoginHandleForUser(uid, {
+          ...userData,
+          email: privateUpdates.email,
+        });
+
+        if (userData.onboardingComplete !== true) {
+          router.replace('/onboarding');
+        } else {
+          router.replace('/(tabs)/feed');
+        }
+      } catch (e) {
+        console.log('Login profile sync failed:', e);
+        await signOut(auth).catch(() => {});
+
+        try {
+          const fallbackUserData = await getOwnUserData(userCredential.user.uid);
+          const uidBlock = getModerationBlockInfo(fallbackUserData);
+          if (uidBlock) {
+            showModerationBlockAlert(uidBlock);
+            return;
+          }
+
+          const fallbackEmailBlock = await fetchEmailModerationBlock(resolvedEmail);
+          if (fallbackEmailBlock) {
+            showModerationBlockAlert(fallbackEmailBlock);
+            return;
+          }
+        } catch (moderationCheckError) {
+          console.warn('Moderation fallback check failed:', moderationCheckError);
+        }
+
+        Alert.alert(t('loginFailed'), e?.message || t('loginFailed'));
+      }
     } catch (error) {
       console.log('Login error:', error);
-      let msg = t('loginFailed');
-      
-      // ✅ THIS IS THE UPDATE FOR BANNED USERS
-      if (error.code === 'auth/user-disabled') {
-        msg = t('accountDisabled');
-      } 
-      else if (error.code === 'auth/user-not-found') {
-        msg = t('noAccountFoundRegister');
-      } else if (error.code === 'auth/wrong-password') {
-        msg = t('incorrectPassword');
-      } else if (error.code === 'auth/invalid-email') {
-        msg = t('invalidEmailFormat');
-      } else if (error.code === 'auth/too-many-requests') {
-        msg = t('accountLocked');
-      }
-      
-      Alert.alert(t('loginFailed'), msg);
+
+      Alert.alert(t('loginFailed'), getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.screen}>
+      <View style={styles.langTopRight}>
+        <LanguagePicker minimal showLabel={false} />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+      {showVerifyBanner ? (
+        <View style={styles.verifyBanner}>
+          <Ionicons name="mail-outline" size={22} color={colors.accent} />
+          <View style={styles.verifyBannerText}>
+            <Text style={styles.verifyBannerTitle}>{t('registrationVerifyTitle')}</Text>
+            <Text style={styles.verifyBannerBody}>
+              {t('registrationVerifyMessage', {
+                email: typeof registeredEmail === 'string' ? registeredEmail : '',
+              })}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {showBannedBanner ? (
+        <View style={styles.blockBanner}>
+          <Ionicons name="ban-outline" size={22} color={colors.danger ?? '#c0392b'} />
+          <View style={styles.verifyBannerText}>
+            <Text style={styles.verifyBannerTitle}>{t('accountBannedTitle')}</Text>
+            <Text style={styles.verifyBannerBody}>{t('accountBannedMessage')}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {showSuspendedBanner ? (
+        <View style={styles.blockBanner}>
+          <Ionicons name="time-outline" size={22} color={colors.danger ?? '#c0392b'} />
+          <View style={styles.verifyBannerText}>
+            <Text style={styles.verifyBannerTitle}>{t('accountSuspendedTitle')}</Text>
+            <Text style={styles.verifyBannerBody}>{t('accountSuspendedLoginHint')}</Text>
+          </View>
+        </View>
+      ) : null}
+
       <Text style={styles.title}>{t('appName')}</Text>
-      
+
       <TextInput
         style={styles.input}
-        placeholder={t('studentEmailPlaceholder')}
-        placeholderTextColor="#aaa"
-        value={email}
-        onChangeText={setEmail}
+        placeholder={t('loginIdentifierPlaceholder')}
+        placeholderTextColor={colors.textMuted}
+        value={identifier}
+        onChangeText={setIdentifier}
         autoCapitalize="none"
-        keyboardType="email-address"
-        autoComplete="email"
+        autoCorrect={false}
+        autoComplete="username"
       />
-      
+
       <TextInput
         style={styles.input}
         placeholder={t('passwordPlaceholder')}
-        placeholderTextColor="#aaa"
+        placeholderTextColor={colors.textMuted}
         value={password}
         onChangeText={setPassword}
         secureTextEntry
         autoComplete="password"
       />
-      
-      {/* Main Login Button */}
-      <Pressable 
-        style={[styles.button, loading && styles.buttonDisabled]} 
+
+      <Pressable
+        style={[styles.button, loading && styles.buttonDisabled]}
         onPress={handleLogin}
         disabled={loading}
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{t('logIn')}</Text>}
+        {loading ? (
+          <ActivityIndicator color={colors.onAccent} />
+        ) : (
+          <Text style={styles.buttonText}>{t('logIn')}</Text>
+        )}
       </Pressable>
 
-      {/* ✅ HELPER LINKS - NOW VERTICAL */}
       <View style={styles.helperLinks}>
-        <Pressable 
-          style={styles.helperButton} 
-          onPress={handleForgotPassword}
-          disabled={forgotLoading}
-        >
+        <Pressable style={styles.helperButton} onPress={handleForgotPassword} disabled={forgotLoading}>
           <Text style={styles.helperText}>
             {forgotLoading ? t('sending') : t('forgotPassword')}
           </Text>
         </Pressable>
 
-        <Pressable 
+        <Pressable
           style={styles.helperButton}
           onPress={handleResendVerification}
           disabled={resendLoading}
@@ -222,74 +387,117 @@ export default function Login() {
         <View style={styles.dividerLine} />
       </View>
 
-      {/* Prominent Register Button */}
       <Link href="/register" asChild>
         <Pressable style={styles.registerButton}>
           <Text style={styles.registerButtonText}>{t('createNewAccount')}</Text>
         </Pressable>
       </Link>
+      </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
+const createStyles = (colors, safeTop = 0) => StyleSheet.create({
+  screen: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: colors.background,
+  },
+  langTopRight: {
+    position: 'absolute',
+    top: safeTop + 12,
+    right: 16,
+    zIndex: 10,
+  },
+  container: {
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
+    paddingTop: safeTop + 48,
+    paddingBottom: 40,
+  },
+  verifyBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
+  },
+  blockBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.danger ?? '#c0392b',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 20,
+  },
+  verifyBannerText: {
+    flex: 1,
+    gap: 4,
+  },
+  verifyBannerTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  verifyBannerBody: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.textSecondary,
   },
   title: {
     fontSize: 28,
-    color: '#fff',
+    color: colors.textPrimary,
     marginBottom: 24,
     textAlign: 'center',
     fontWeight: 'bold',
   },
   input: {
-    backgroundColor: '#1e1e1e',
-    color: '#fff',
+    backgroundColor: colors.panel,
+    color: colors.textPrimary,
     padding: 16,
     borderRadius: 12,
     marginBottom: 16,
-    borderColor: '#333',
+    borderColor: colors.borderSoft,
     borderWidth: 1,
     fontSize: 16,
   },
   button: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.accent,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
     marginTop: 8,
-    marginBottom: 16, // Reduced from 20 to 16
+    marginBottom: 16,
   },
   buttonDisabled: {
     opacity: 0.7,
   },
   buttonText: {
-    color: '#121212',
+    color: colors.onAccent,
     fontSize: 16,
     fontWeight: 'bold',
   },
-  
-  /* ✅ UPDATED: Helper Links - Now Vertical */
   helperLinks: {
     alignItems: 'center',
     marginBottom: 24,
-    gap: 12, // Space between links
+    gap: 12,
   },
   helperButton: {
     paddingVertical: 8,
     paddingHorizontal: 12,
   },
   helperText: {
-    color: '#bbb',
+    color: colors.textSecondary,
     fontSize: 14,
     textDecorationLine: 'underline',
   },
-  
-  /* Divider Styles */
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -298,25 +506,23 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#333',
+    backgroundColor: colors.borderSoft,
   },
   dividerText: {
-    color: '#666',
+    color: colors.textMuted,
     paddingHorizontal: 10,
     fontSize: 14,
   },
-
-  /* Register Button Styles */
   registerButton: {
-    backgroundColor: '#1e1e1e',
+    backgroundColor: colors.panel,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
+    borderWidth: 2,
+    borderColor: colors.accent,
   },
   registerButtonText: {
-    color: '#fff',
+    color: colors.accent,
     fontSize: 16,
     fontWeight: '600',
   },

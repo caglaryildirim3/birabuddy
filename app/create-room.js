@@ -1,7 +1,7 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
-import { useState } from 'react';
+import { collection, doc, serverTimestamp, setDoc, Timestamp, writeBatch } from 'firebase/firestore';
+import { useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,20 +12,28 @@ import {
   Text,
   TextInput,
   View,
-  SafeAreaView
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { auth, db } from '../firebase/firebaseConfig';
 import { useButtonDelay } from '../hooks/useButtonDelay';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { useTheme } from '../contexts/ThemeContext';
+import { NEIGHBORHOODS_BY_CITY, CITIES } from '../constants/locations';
+import { ROOM_VISIBILITY } from '../utils/roomUtils';
+import { recordMeetupAttendance } from '../utils/meetupAttendanceUtils';
 
 export default function CreateRoom() {
   const { t } = useTranslation();
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [city, setCity] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
   const [barName, setBarName] = useState('');
   const [maxPeople, setMaxPeople] = useState('');
+  const [visibility, setVisibility] = useState(ROOM_VISIBILITY.PUBLIC);
 
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -41,7 +49,8 @@ export default function CreateRoom() {
   const DESCRIPTION_LIMIT = 200;
   const BAR_NAME_LIMIT = 50;
 
-  const neighborhoods = ['hisarustu', 'besiktas', 'kadikoy', 'cihangir', 'taksim', 'bomonti', 'karakoy'];
+  const cities = CITIES;
+  const neighborhoods = city ? NEIGHBORHOODS_BY_CITY[city] : [];
 
   const today = new Date();
   const maxDate = new Date();
@@ -76,6 +85,11 @@ export default function CreateRoom() {
     
     if (name.trim().length > NAME_LIMIT) {
       Alert.alert(t('nameTooLong'), t('roomNameLimit', { limit: NAME_LIMIT }));
+      return;
+    }
+
+    if (!city) {
+      Alert.alert(t('missingField'), t('selectCity'));
       return;
     }
 
@@ -143,32 +157,47 @@ export default function CreateRoom() {
       String(selectedTime.getMinutes()).padStart(2, '0');
 
     try {
-      const roomRef = await addDoc(collection(db, 'rooms'), {
+      const uid = auth.currentUser?.uid;
+      if (!uid) throw new Error(t('loginRequired'));
+
+      const roomRef = doc(collection(db, 'rooms'));
+      const batch = writeBatch(db);
+      batch.set(roomRef, {
         name: name.trim(),
         description: description.trim(),
+        city: city,
         neighborhood: neighborhood,
         barName: barName.trim(),
-        fullLocation: `${barName.trim()}, ${neighborhood}`,
-        date: Timestamp.fromDate(roomDateTime), 
+        fullLocation: `${barName.trim()}, ${neighborhood}, ${city}`,
+        date: Timestamp.fromDate(roomDateTime),
         time: formattedTime,
         maxParticipants: max,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        createdBy: auth.currentUser?.uid,
-        participants: [auth.currentUser?.uid],
+        createdBy: uid,
+        participants: [uid],
         requests: [],
         isActive: true,
+        visibility,
       });
-
-      await setDoc(doc(db, 'rooms', roomRef.id, 'participants', auth.currentUser.uid), {
-        uid: auth.currentUser.uid,
+      batch.set(doc(db, 'rooms', roomRef.id, 'participants', uid), {
+        uid,
         nickname: auth.currentUser.displayName || 'anonymous',
         joinedAt: serverTimestamp(),
       });
+      await batch.commit();
 
-      Alert.alert(t('roomCreated'), t('roomCreatedSuccess'));
-      
-      router.replace('/my-rooms');
+      await recordMeetupAttendance({
+        roomId: roomRef.id,
+        room: {
+          date: Timestamp.fromDate(roomDateTime),
+          time: formattedTime,
+          barName: barName.trim(),
+        },
+        coParticipantUids: [auth.currentUser?.uid],
+      });
+
+      router.replace('/(tabs)/feed');
       
     } catch (error) {
       console.error('Error creating room:', error);
@@ -215,14 +244,14 @@ export default function CreateRoom() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#4A3B47' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
         <View style={styles.headerRow}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={28} color="#E8A4C7" />
+            <Ionicons name="arrow-back" size={28} color={colors.textPrimary} />
           </Pressable>
         </View>
 
@@ -237,7 +266,7 @@ export default function CreateRoom() {
                 name.length > NAME_LIMIT && styles.inputError
               ]}
               placeholder={t('roomNamePlaceholder')}
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.textMuted}
               value={name}
               onChangeText={setName}
               maxLength={NAME_LIMIT + 10} 
@@ -258,7 +287,7 @@ export default function CreateRoom() {
                 description.length > DESCRIPTION_LIMIT && styles.inputError
               ]}
               placeholder={t('descriptionPlaceholder')}
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.textMuted}
               value={description}
               onChangeText={setDescription}
               multiline={true}
@@ -277,29 +306,75 @@ export default function CreateRoom() {
           <Text style={styles.sectionTitle}>📍 {t('whereToMeet')}</Text>
           
           <View style={styles.inputContainer}>
+            <Text style={styles.fieldLabel}>{t('city')}</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.neighborhoodContainer}
+            >
+              {cities.map((cityOption, index) => {
+                const isSelected = city === cityOption;
+                return (
+                  <Pressable
+                    key={index}
+                    style={[
+                      styles.neighborhoodButton,
+                      isSelected && styles.neighborhoodButtonSelected,
+                    ]}
+                    onPress={() => {
+                      setCity(cityOption);
+                      setNeighborhood('');
+                    }}
+                  >
+                    {isSelected ? (
+                      <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+                    ) : null}
+                    <Text
+                      style={[
+                        styles.neighborhoodButtonText,
+                        isSelected && styles.neighborhoodButtonTextSelected,
+                      ]}
+                    >
+                      {cityOption}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          <View style={styles.inputContainer}>
             <Text style={styles.fieldLabel}>{t('neighborhood')}</Text>
             <ScrollView 
               horizontal 
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.neighborhoodContainer}
             >
-              {neighborhoods.map((hood, index) => (
-                <Pressable
-                  key={index}
-                  style={[
-                    styles.neighborhoodButton,
-                    neighborhood === hood && styles.neighborhoodButtonSelected
-                  ]}
-                  onPress={() => setNeighborhood(hood)}
-                >
-                  <Text style={[
-                    styles.neighborhoodButtonText,
-                    neighborhood === hood && styles.neighborhoodButtonTextSelected
-                  ]}>
-                    {hood}
-                  </Text>
-                </Pressable>
-              ))}
+              {neighborhoods.map((hood, index) => {
+                const isSelected = neighborhood === hood;
+                return (
+                  <Pressable
+                    key={index}
+                    style={[
+                      styles.neighborhoodButton,
+                      isSelected && styles.neighborhoodButtonSelected,
+                    ]}
+                    onPress={() => setNeighborhood(hood)}
+                  >
+                    {isSelected ? (
+                      <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+                    ) : null}
+                    <Text
+                      style={[
+                        styles.neighborhoodButtonText,
+                        isSelected && styles.neighborhoodButtonTextSelected,
+                      ]}
+                    >
+                      {hood}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </ScrollView>
           </View>
 
@@ -311,7 +386,7 @@ export default function CreateRoom() {
                 barName.length > BAR_NAME_LIMIT && styles.inputError
               ]}
               placeholder={t('barPlaceholder')}
-              placeholderTextColor="#999"
+              placeholderTextColor={colors.textMuted}
               value={barName}
               onChangeText={setBarName}
               maxLength={BAR_NAME_LIMIT + 10}
@@ -363,30 +438,78 @@ export default function CreateRoom() {
             </ScrollView>
           </View>
 
-          <Pressable onPress={toggleTimePicker} style={styles.input}>
-            <Text style={styles.dateText}>
-              ⏰ {formatTimeForDisplay(selectedTime)}
-            </Text>
-          </Pressable>
-          
-          {showTimePicker && (
-            <DateTimePicker
-              value={selectedTime}
-              mode="time"
-              is24Hour={true}
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={onTimeChange}
-            />
-          )}
+          <View style={styles.fieldSpacing}>
+            <Pressable onPress={toggleTimePicker} style={styles.input}>
+              <Text style={styles.dateText}>
+                ⏰ {formatTimeForDisplay(selectedTime)}
+              </Text>
+            </Pressable>
 
-          <TextInput
-            style={styles.input}
-            placeholder={t('maxPeoplePlaceholder')}
-            placeholderTextColor="#999"
-            keyboardType="numeric"
-            value={maxPeople}
-            onChangeText={setMaxPeople}
-          />
+            {showTimePicker && (
+              <DateTimePicker
+                value={selectedTime}
+                mode="time"
+                is24Hour={true}
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={onTimeChange}
+                {...(Platform.OS === 'ios' && {
+                  textColor: colors.textPrimary,
+                  themeVariant: 'light',
+                })}
+              />
+            )}
+          </View>
+
+          <View style={styles.fieldSpacing}>
+            <TextInput
+              style={styles.input}
+              placeholder={t('maxPeoplePlaceholder')}
+              placeholderTextColor={colors.textMuted}
+              keyboardType="numeric"
+              value={maxPeople}
+              onChangeText={setMaxPeople}
+            />
+          </View>
+
+          <View style={styles.visibilitySection}>
+          <View style={styles.visibilityRow}>
+            <Pressable
+              style={[
+                styles.visibilityOption,
+                visibility === ROOM_VISIBILITY.PUBLIC && styles.visibilityOptionSelected,
+              ]}
+              onPress={() => setVisibility(ROOM_VISIBILITY.PUBLIC)}
+            >
+              <Text
+                style={[
+                  styles.visibilityOptionText,
+                  visibility === ROOM_VISIBILITY.PUBLIC && styles.visibilityOptionTextSelected,
+                ]}
+              >
+                🌍 {t('roomPublic')}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.visibilityOption,
+                visibility === ROOM_VISIBILITY.PRIVATE && styles.visibilityOptionSelected,
+              ]}
+              onPress={() => setVisibility(ROOM_VISIBILITY.PRIVATE)}
+            >
+              <Text
+                style={[
+                  styles.visibilityOptionText,
+                  visibility === ROOM_VISIBILITY.PRIVATE && styles.visibilityOptionTextSelected,
+                ]}
+              >
+                🔒 {t('roomPrivate')}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.visibilityHint}>
+            {visibility === ROOM_VISIBILITY.PUBLIC ? t('roomPublicHint') : t('roomPrivateHint')}
+          </Text>
+          </View>
 
           <Pressable 
             style={[
@@ -400,7 +523,7 @@ export default function CreateRoom() {
               styles.buttonText,
               isDisabled && styles.buttonTextDisabled
             ]}>
-              {isDisabled ? '⏳ ' + t('creatingRoom') : '✨ ' + t('createRoomButton')}
+              {isDisabled ? t('creatingRoom') : t('createRoomButton')}
             </Text>
           </Pressable>
 
@@ -410,7 +533,7 @@ export default function CreateRoom() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   headerRow: {
     paddingHorizontal: 20,
     paddingTop: 10,
@@ -423,7 +546,7 @@ const styles = StyleSheet.create({
     marginLeft: -8,
   },
   container: {
-    backgroundColor: '#4A3B47',
+    backgroundColor: colors.background,
     padding: 24,
     paddingTop: 10,
     flexGrow: 1,
@@ -431,14 +554,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#E8A4C7',
+    color: colors.textPrimary,
     textAlign: 'center',
     marginBottom: 10,
     letterSpacing: 1,
   },
   subtitle: {
     fontSize: 16,
-    color: '#E8D5DA',
+    color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: 30,
     fontStyle: 'italic',
@@ -448,12 +571,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   input: {
-    backgroundColor: '#5A4B5C',
-    color: '#E8D5DA',
+    backgroundColor: colors.panel,
+    color: colors.textPrimary,
     padding: 16,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: colors.borderSoft,
     fontSize: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -462,33 +585,33 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   inputError: {
-    borderColor: '#E74C3C',
+    borderColor: colors.danger,
     borderWidth: 3,
   },
   textArea: {
     minHeight: 80,
   },
   characterCount: {
-    color: '#E8D5DA',
+    color: colors.textPrimary,
     fontSize: 12,
     textAlign: 'right',
     marginTop: 4,
     opacity: 0.7,
   },
   characterCountError: {
-    color: '#E74C3C',
+    color: colors.danger,
     fontWeight: 'bold',
     opacity: 1,
   },
   sectionTitle: {
-    color: '#E8A4C7',
+    color: colors.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 12,
     textAlign: 'center',
   },
   fieldLabel: {
-    color: '#E8A4C7',
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 8,
@@ -499,26 +622,35 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   neighborhoodButton: {
-    backgroundColor: '#5A4B5C',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.panel,
     borderRadius: 20,
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: colors.borderSoft,
   },
   neighborhoodButtonSelected: {
-    backgroundColor: '#E8A4C7',
-    borderColor: '#E8A4C7',
+    backgroundColor: colors.panelSoft,
+    borderColor: colors.accent,
+    borderWidth: 2,
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
   },
   neighborhoodButtonText: {
-    color: '#E8D5DA',
+    color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '500',
     textTransform: 'capitalize',
   },
   neighborhoodButtonTextSelected: {
-    color: '#4A3B47',
-    fontWeight: 'bold',
+    color: colors.textPrimary,
+    fontWeight: '700',
   },
   dateContainer: {
     marginBottom: 20,
@@ -528,66 +660,109 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   dayButton: {
-    backgroundColor: '#5A4B5C',
+    backgroundColor: colors.panel,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 16,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#7A6B7D',
+    borderColor: colors.borderSoft,
     minWidth: 70,
   },
   dayButtonSelected: {
-    backgroundColor: '#E8A4C7',
-    borderColor: '#E8A4C7',
+    backgroundColor: colors.panelElevated,
+    borderColor: colors.accent,
+    borderWidth: 2,
   },
   todayButton: {
-    borderColor: '#FFD700',
+    borderColor: colors.accent,
     borderWidth: 3,
   },
   dayButtonText: {
-    color: '#E8D5DA',
+    color: colors.textPrimary,
     fontSize: 14,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
   dayButtonTextSelected: {
-    color: '#4A3B47',
+    color: colors.textPrimary,
     fontWeight: 'bold',
   },
   todayButtonText: {
-    color: '#FFD700',
+    color: colors.accent,
     fontWeight: 'bold',
   },
   dateButtonText: {
-    color: '#E8D5DA',
+    color: colors.textPrimary,
     fontSize: 12,
     marginTop: 2,
     opacity: 0.8,
   },
   dateButtonTextSelected: {
-    color: '#4A3B47',
+    color: colors.textPrimary,
     opacity: 1,
     fontWeight: '600',
   },
   todayDateText: {
-    color: '#FFD700',
+    color: colors.accent,
     opacity: 1,
     fontWeight: '600',
   },
   todayLabel: {
-    color: '#FFD700',
+    color: colors.accent,
     fontSize: 10,
     fontWeight: 'bold',
     marginTop: 2,
     textTransform: 'uppercase',
   },
   dateText: {
-    color: '#E8D5DA',
+    color: colors.textPrimary,
     fontSize: 16,
   },
+  fieldSpacing: {
+    marginBottom: 16,
+  },
+  visibilitySection: {
+    marginBottom: 8,
+  },
+  visibilityRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  visibilityOption: {
+    flex: 1,
+    backgroundColor: colors.panel,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.borderSoft,
+  },
+  visibilityOptionSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.panelElevated,
+  },
+  visibilityOptionText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  visibilityOptionTextSelected: {
+    color: colors.textPrimary,
+    fontWeight: 'bold',
+  },
+  visibilityHint: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 8,
+    lineHeight: 18,
+  },
   button: {
-    backgroundColor: '#E8A4C7',
+    backgroundColor: colors.accent,
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
@@ -600,16 +775,16 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   buttonText: {
-    color: '#4A3B47',
+    color: colors.onAccent,
     fontSize: 18,
     fontWeight: 'bold',
     letterSpacing: 0.5,
   },
   buttonDisabled: {
-    backgroundColor: '#7A6B7D',
+    backgroundColor: colors.panel,
     opacity: 0.7,
   },
   buttonTextDisabled: {
-    color: '#E8D5DA',
+    color: colors.textPrimary,
   },
 });

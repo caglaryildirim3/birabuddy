@@ -2,14 +2,14 @@
   "expo": {
     "name": "birabuddy",
     "slug": "birabuddy",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "birabuddy",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "description": "Find people to drink with - Only for students! (this is not a dating app :)",
-    "primaryColor": "#1E1E1E",
+    "description": "Find people to drink with - Only for students!",
+    "primaryColor": "#FFC629",
     "platforms": [
       "ios",
       "android"
@@ -17,23 +17,34 @@
     "updates": {
       "url": "https://u.expo.dev/61232958-c524-4b7e-97c2-3a40115be165"
     },
-    "runtimeVersion": "1.0.2",
+    "runtimeVersion": "1.0.3",
     "ios": {
       "supportsTablet": false,
-      "deploymentTarget": "13.4",
       "bundleIdentifier": "com.caglaryildirim.birabuddy2",
+      "buildNumber": "31",
+      "backgroundColor": "#FFFFFF",
       "infoPlist": {
-        "NSCameraUsageDescription": "This app uses camera to scan beer labels and take photos",
-        "NSLocationWhenInUseUsageDescription": "This app uses location to find nearby breweries and bars",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Allow BiraBuddy to use your camera to take post photos.",
+        "NSLocalNetworkUsageDescription": "BiraBuddy needs local network access to connect to the development server.",
+        "NSBonjourServices": [
+          "_expo._tcp",
+          "_react-native-packager._tcp"
+        ],
+        "LSApplicationQueriesSchemes": [
+          "instagram",
+          "instagram-stories"
+        ]
       }
     },
     "android": {
-      "package": "com.caglaryildirim.birabuddy2",
+      "package": "com.caglaryildirim.birabuddy",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#1E1E1E"
+        "backgroundColor": "#FFFFFF"
       },
+      "backgroundColor": "#FFFFFF",
       "edgeToEdgeEnabled": true,
       "permissions": [
         "CAMERA",
@@ -49,12 +60,31 @@
     "plugins": [
       "expo-router",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow BiraBuddy to share your approximate location with friends when you go live."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow BiraBuddy to access your photos to update your profile."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#1E1E1E"
+          "backgroundColor": "#FFFFFF"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#FFC629"
         }
       ]
     ],
@@ -63,6 +93,7 @@
     },
     "extra": {
       "router": {},
+      "facebookAppId": "",
       "eas": {
         "projectId": "61232958-c524-4b7e-97c2-3a40115be165"
       }
